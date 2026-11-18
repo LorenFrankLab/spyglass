@@ -735,9 +735,10 @@ if run_motion_example:
 #   re-silences masked samples after interpolation.
 # - **`rigid_fast`** has no default row and is not recommended. To compare it,
 #   insert a `MotionEstimationParameters` row with
-#   `params={"preset": "rigid_fast", "max_gap_s": 30.0}`, pair it with
-#   `kriging_remove_channels_v1` in a new `MotionCorrectionParameters` row, and
-#   run `motion_mode="apply"` with that name.
+#   `motion_estimation_params={"preset": "rigid_fast", "max_gap_s": 30.0}`,
+#   pair it with `kriging_remove_channels_v1` in a new
+#   `MotionCorrectionParameters` row, and run `motion_mode="apply"` with that
+#   name.
 # - **Storage.** A `MotionEstimate` is a database row (blob), not an NWB file. A
 #   `MotionCorrectedRecording` is a full NWB `ElectricalSeries` about the size
 #   of its source; an `"apply"` sort keeps both on disk.

@@ -794,7 +794,7 @@ def test_artifact_detection_parameters_validates_via_insert1(dj_conn):
 
     bad_row = {
         "artifact_detection_params_name": "params_validates_unit_test",
-        "params": {
+        "artifact_detection_params": {
             "detect": True,
             "amplitude_threshold_uv": 100.0,
             "not_a_real_field": "x",  # rejected by extra="forbid"
@@ -1296,7 +1296,7 @@ def test_shared_artifact_group_multi_member_union(
     ArtifactDetectionParameters.insert1(
         {
             "artifact_detection_params_name": params_name,
-            "params": ArtifactDetectionParamsSchema(
+            "artifact_detection_params": ArtifactDetectionParamsSchema(
                 detect=True,
                 amplitude_threshold_uv=1000.0,
                 zscore_threshold=None,

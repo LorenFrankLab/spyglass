@@ -224,7 +224,7 @@ def test_analyzer_waveform_params_default_rows(dj_conn):
 
     AnalyzerWaveformParameters.insert_default()
     rows = {
-        r["waveform_params_name"]: r["params"]
+        r["waveform_params_name"]: r["waveform_params"]
         for r in AnalyzerWaveformParameters.fetch(as_dict=True)
     }
     for name in (
@@ -260,7 +260,7 @@ def test_analyzer_waveform_params_rejects_unsafe_name(dj_conn):
         AnalyzerWaveformParameters().insert1(
             {
                 "waveform_params_name": "bad/name",
-                "params": AnalyzerWaveformParamsSchema().model_dump(),
+                "waveform_params": AnalyzerWaveformParamsSchema().model_dump(),
             }
         )
 
@@ -283,20 +283,26 @@ def test_analyzer_waveform_params_insert_guards(dj_conn):
     bad_blob["whiten"] = True  # display + whiten=True -> invalid pair
     with pytest.raises(ValidationError, match="display .* must be unwhitened"):
         AnalyzerWaveformParameters().insert1(
-            {"waveform_params_name": "bad_pair", "params": bad_blob}
+            {"waveform_params_name": "bad_pair", "waveform_params": bad_blob}
         )
 
     cortex_blob = (
         AnalyzerWaveformParameters
         & {"waveform_params_name": "franklab_cortex_actual_waveforms"}
-    ).fetch1("params")
+    ).fetch1("waveform_params")
     with pytest.raises(DuplicateParameterContentError):
         AnalyzerWaveformParameters().insert1(
-            {"waveform_params_name": "cortex_clone", "params": cortex_blob}
+            {
+                "waveform_params_name": "cortex_clone",
+                "waveform_params": cortex_blob,
+            }
         )
     try:
         AnalyzerWaveformParameters().insert1(
-            {"waveform_params_name": "cortex_clone", "params": cortex_blob},
+            {
+                "waveform_params_name": "cortex_clone",
+                "waveform_params": cortex_blob,
+            },
             allow_duplicate_params=True,
         )
         assert AnalyzerWaveformParameters & {

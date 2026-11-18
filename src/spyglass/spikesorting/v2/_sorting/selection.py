@@ -219,6 +219,6 @@ def validate_motion_correction_source(plan) -> None:
         )
     reject_internal_motion_correction(
         plan.master_restriction["sorter"],
-        (SorterParameters & plan.master_restriction).fetch1("params"),
+        (SorterParameters & plan.master_restriction).fetch1("sorter_params"),
         sorter_params_name=plan.master_restriction["sorter_params_name"],
     )

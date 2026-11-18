@@ -69,7 +69,7 @@ def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
     model_cls : type[pydantic.BaseModel]
         The schema to validate against.
     payload : dict
-        The raw parameter dict, typically a Lookup row's ``params`` blob.
+        The raw parameter dict, typically a Lookup row's content blob.
 
     Returns
     -------
@@ -84,7 +84,42 @@ def _validate_params(model_cls: type[BaseModel], payload: dict) -> dict:
     return model_cls.model_validate(payload).model_dump()
 
 
-def _assert_schema_version_matches(row: dict, *, table_name: str) -> None:
+def params_column(names) -> str:
+    """Return a parameter table's content-blob column.
+
+    The column is the table's ``*_params_name`` attribute without the
+    ``_name`` suffix (``sorter_params_name`` -> ``sorter_params``), the
+    Spyglass parameter-table convention.
+
+    Parameters
+    ----------
+    names : str or iterable of str
+        The ``*_params_name`` attribute, or attribute names (a heading, a
+        row's keys) holding exactly one such attribute.
+
+    Returns
+    -------
+    str
+
+    Raises
+    ------
+    ValueError
+        If ``names`` does not hold exactly one ``*_params_name`` attribute.
+    """
+    if isinstance(names, str):
+        names = (names,)
+    matches = [name for name in names if name.endswith("_params_name")]
+    if len(matches) != 1:
+        raise ValueError(
+            "expected exactly one '*_params_name' attribute to name the "
+            f"parameter content column, got {matches!r}"
+        )
+    return matches[0].removesuffix("_name")
+
+
+def _assert_schema_version_matches(
+    row: dict, *, column: str, table_name: str
+) -> None:
     """Raise if outer and inner Pydantic ``schema_version`` disagree.
 
     Code that branches on the outer column would otherwise route the row to
@@ -93,8 +128,10 @@ def _assert_schema_version_matches(row: dict, *, table_name: str) -> None:
     Parameters
     ----------
     row : dict
-        The row being inserted, with a validated ``params`` blob. A row
+        The row being inserted, with a validated content blob. A row
         without ``params_schema_version`` passes.
+    column : str
+        The content-blob column (:func:`params_column`).
     table_name : str
         Human-readable table name for the error message.
 
@@ -102,9 +139,9 @@ def _assert_schema_version_matches(row: dict, *, table_name: str) -> None:
     ------
     ValueError
         If ``row['params_schema_version']`` is set and does not match
-        ``row['params']['schema_version']``.
+        ``row[column]['schema_version']``.
     """
-    inner = int(row["params"]["schema_version"])
+    inner = int(row[column]["schema_version"])
     if "params_schema_version" not in row:
         return
     outer = int(row["params_schema_version"])
@@ -112,7 +149,7 @@ def _assert_schema_version_matches(row: dict, *, table_name: str) -> None:
         raise ValueError(
             f"{table_name}.insert1: params_schema_version={outer} does "
             f"not match the inner Pydantic schema_version={inner} on the "
-            "validated params blob. Drop the column or align it with the "
+            f"validated {column} blob. Drop the column or align it with the "
             "blob's schema_version."
         )
 
@@ -123,8 +160,9 @@ def validate_lookup_rows(
     """Validate + normalize params-Lookup rows before a (bulk) insert.
 
     Shared body of the validated-Lookup ``insert`` overrides. Per row:
-    normalize to a dict, validate ``params``, run ``per_row_hook``, and check
-    ``params_schema_version`` against the blob.
+    normalize to a dict, validate the content blob (:func:`params_column`),
+    run ``per_row_hook``, and check ``params_schema_version`` against the
+    blob.
 
     Parameters
     ----------
@@ -132,7 +170,8 @@ def validate_lookup_rows(
         The rows handed to ``insert`` (mappings, positional sequences, or a
         ``QueryExpression``); normalized per row via ``_insert_row_to_dict``.
     attr_names : Sequence[str]
-        ``self.heading.names``, used to label positional rows.
+        ``self.heading.names``, used to label positional rows and to name the
+        content column.
     schema_for : Callable[[dict], type[BaseModel]]
         Picks the schema for a row (per ``sorter`` for ``SorterParameters``).
     table_name : str
@@ -145,19 +184,34 @@ def validate_lookup_rows(
     -------
     list[dict]
         Validated rows to hand to ``super().insert``.
+
+    Raises
+    ------
+    ValueError
+        If a row names its content ``params`` instead of the table's
+        content column.
     """
+    column = params_column(attr_names)
     validated = []
     for row in rows:
         row = _insert_row_to_dict(row, attr_names)
+        if "params" in row and column not in row:
+            raise ValueError(
+                f"{table_name}.insert: the parameter content column is "
+                f"{column!r}, not 'params'. Rename the row's 'params' key "
+                f"to {column!r}."
+            )
         schema_cls = schema_for(row)
-        row["params"] = _validate_params(schema_cls, row["params"])
+        row[column] = _validate_params(schema_cls, row[column])
         if per_row_hook is not None:
             per_row_hook(row, schema_cls)
         # 0 is the column default ("unspecified"); an explicit non-zero value
         # is kept so the drift check can catch a mismatch.
         if row.get("params_schema_version", 0) == 0:
-            row["params_schema_version"] = int(row["params"]["schema_version"])
-        _assert_schema_version_matches(row, table_name=table_name)
+            row["params_schema_version"] = int(row[column]["schema_version"])
+        _assert_schema_version_matches(
+            row, column=column, table_name=table_name
+        )
         validated.append(row)
     return validated
 
@@ -191,22 +245,24 @@ def parameter_row_fingerprint(
 ) -> str:
     """Return the content fingerprint of one blob-valued parameter row.
 
-    Works on a stored or a validated insert row. The row name is excluded.
+    Works on a stored or a validated insert row. The row name is excluded
+    from the fingerprint but names the content column (:func:`params_column`).
 
     Parameters
     ----------
     table_name : str
         The fingerprint ``table`` field (e.g. ``"SorterParameters"``).
     row : dict
-        The parameter row.
+        The parameter row, including its ``*_params_name`` key.
     sorter_keyed, matcher_keyed : bool, optional
         Fold ``row["sorter"]`` / ``row["matcher"]`` into the identity
         (``SorterParameters`` / ``MatcherParameters``).
     """
     # An insert dict may omit the column; the blob's version is authoritative.
+    content = row[params_column(row)]
     version = row.get("params_schema_version")
     if version is None:
-        version = row["params"]["schema_version"]
+        version = content["schema_version"]
     # Only SorterParameters carries execution_params.
     exec_params = _jsonable_blob(row.get("execution_params"))
     exec_version = None
@@ -218,7 +274,7 @@ def parameter_row_fingerprint(
             exec_version = int(exec_version)
     return parameter_fingerprint(
         table_name,
-        params=_jsonable_blob(row["params"]),
+        params=_jsonable_blob(content),
         params_schema_version=int(version),
         job_kwargs=_jsonable_blob(row.get("job_kwargs")),
         sorter=row.get("sorter") if sorter_keyed else None,
@@ -249,7 +305,7 @@ def reject_duplicate_parameter_content(
     table : dj.Table
         The Lookup table instance, queried for already-stored rows.
     validated_rows : list[dict]
-        Output of :func:`validate_lookup_rows` (plain-scalar ``params``).
+        Output of :func:`validate_lookup_rows` (plain-scalar content).
     table_name : str
         The fingerprint ``table`` field (e.g. ``"SorterParameters"``).
     name_attr : str
@@ -554,7 +610,7 @@ def _insert_row_to_dict(row, attr_names) -> dict:
     Returns
     -------
     dict
-        A shallow-copied dict suitable for in-place ``params`` rewrite.
+        A shallow-copied dict suitable for in-place content rewrite.
 
     Raises
     ------

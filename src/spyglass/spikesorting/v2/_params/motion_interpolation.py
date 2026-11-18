@@ -17,7 +17,7 @@ MOTION_INTERPOLATION_SCHEMA_VERSION = 1
 
 
 class MotionInterpolationParamsSchema(BaseModel):
-    """Validated ``params`` for a ``MotionInterpolationParameters`` row.
+    """Validated ``motion_interpolation_params`` of a parameter row.
 
     Attributes
     ----------

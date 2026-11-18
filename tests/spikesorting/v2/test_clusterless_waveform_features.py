@@ -193,7 +193,7 @@ def _run_clusterless(session, *, tuned):
             {
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": params_name,
-                "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+                "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
                 "params_schema_version": 4,
                 "job_kwargs": None,
             },

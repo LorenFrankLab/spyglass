@@ -251,7 +251,8 @@ def resolve_estimation_params(params: dict) -> dict:
     Parameters
     ----------
     params : dict
-        A ``MotionEstimationParameters.params`` blob (validated or as fetched).
+        A ``MotionEstimationParameters.motion_estimation_params`` blob
+        (validated or as fetched).
 
     Returns
     -------
@@ -596,7 +597,7 @@ def unfiltered_source_problem(
         The source's ``PreprocessingParameters`` row (for a concatenated
         recording, the concatenation's recipe).
     preprocessing_params : dict
-        That row's ``params`` blob.
+        That row's ``preprocessing_params`` blob.
 
     Returns
     -------
@@ -1427,8 +1428,8 @@ def resolve_interpolation_params(params: dict) -> dict:
     Parameters
     ----------
     params : dict
-        A ``MotionInterpolationParameters.params`` blob (validated or as
-        fetched).
+        A ``MotionInterpolationParameters.motion_interpolation_params`` blob
+        (validated or as fetched).
 
     Returns
     -------
@@ -1818,7 +1819,7 @@ def motion_estimate_selection_identity(
     artifact_detection_id : uuid.UUID, str or None
     motion_estimation_params_name : str
     estimation_params : dict
-        That ``MotionEstimationParameters`` row's ``params`` blob.
+        The row's ``motion_estimation_params`` blob.
 
     Returns
     -------
@@ -1867,7 +1868,7 @@ def motion_corrected_selection_identity(
     motion_estimate_id : uuid.UUID or str
     motion_interpolation_params_name : str
     interpolation_params : dict
-        That ``MotionInterpolationParameters`` row's ``params`` blob.
+        The row's ``motion_interpolation_params`` blob.
 
     Returns
     -------

@@ -64,7 +64,7 @@ def concat_member_curation(chronic_2_session_minirec):
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": params_name,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,

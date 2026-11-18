@@ -104,20 +104,22 @@ class MotionEstimationParameters(
 ):
     """Named motion-estimation recipes: a SpikeInterface preset plus overrides.
 
-    ``params`` is validated by :class:`MotionEstimationParamsSchema`; an
+    ``motion_estimation_params`` is validated by
+    :class:`MotionEstimationParamsSchema`; an
     override key the selected SpikeInterface method does not accept is
     rejected at insert. ``insert_default`` ships ``dredge_v1`` and
     ``dredge_fast_v1``. No recipe here is validated for a particular probe.
 
     ``job_kwargs`` (detect-and-localize pass) is not part of the estimate's
-    identity. The seed belongs in ``params.noise_levels_seed``, so a
+    identity. The seed belongs in
+    ``motion_estimation_params.noise_levels_seed``, so a
     ``random_seed`` job kwarg is rejected.
     """
 
     definition = """
     motion_estimation_params_name: varchar(64)
     ---
-    params: blob
+    motion_estimation_params: blob
     params_schema_version=1: int
     job_kwargs=null: blob  # SI job kwargs for detection and localization
     """
@@ -133,15 +135,15 @@ class MotionEstimationParameters(
         Raises
         ------
         ValueError
-            If ``params`` has an unknown override key or ``job_kwargs``
-            contains ``random_seed``.
+            If ``motion_estimation_params`` has an unknown override key or
+            ``job_kwargs`` contains ``random_seed``.
         """
         from spyglass.spikesorting.v2._motion.estimation import (
             resolve_estimation_params,
         )
 
         def _resolve_and_check_job_kwargs(row, _schema_cls):
-            resolve_estimation_params(row["params"])
+            resolve_estimation_params(row["motion_estimation_params"])
             if "random_seed" in (row.get("job_kwargs") or {}):
                 raise ValueError(
                     "MotionEstimationParameters.job_kwargs must not contain "
@@ -173,7 +175,8 @@ class MotionInterpolationParameters(
 ):
     """Named motion-interpolation recipes for applying a saved estimate.
 
-    Validated by :class:`MotionInterpolationParamsSchema`. Every argument
+    ``motion_interpolation_params`` is validated by
+    :class:`MotionInterpolationParamsSchema`. Every argument
     (``border_mode``, ``spatial_interpolation_method``, ``sigma_um``, ``p``,
     ``num_closest``) is required so no SpikeInterface default is relied on.
     ``insert_default`` ships ``kriging_force_extrapolate_v1`` (the
@@ -183,7 +186,7 @@ class MotionInterpolationParameters(
     definition = """
     motion_interpolation_params_name: varchar(64)
     ---
-    params: blob
+    motion_interpolation_params: blob
     params_schema_version=1: int
     """
 
@@ -256,7 +259,7 @@ _SOURCE_SELECTION_TABLES = {
 def preprocessing_filter_problem(preprocessing_params_name: str) -> str | None:
     """Say why a preprocessing recipe's traces cannot be motion-estimated.
 
-    Fetches the recipe's ``params`` and applies
+    Fetches the recipe's ``preprocessing_params`` and applies
     :func:`._motion.unfiltered_source_problem`.
 
     Parameters
@@ -274,7 +277,7 @@ def preprocessing_filter_problem(preprocessing_params_name: str) -> str | None:
         (
             PreprocessingParameters
             & {"preprocessing_params_name": preprocessing_params_name}
-        ).fetch1("params"),
+        ).fetch1("preprocessing_params"),
     )
 
 
@@ -475,7 +478,7 @@ class MotionEstimateFetched(NamedTuple):
     selection : dict
         The ``MotionEstimateSelection`` row.
     params : dict
-        The recipe's ``params`` blob.
+        The recipe's ``motion_estimation_params`` blob.
     job_kwargs : dict
         Resolved SpikeInterface job kwargs.
     source_row : dict
@@ -628,7 +631,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
                     "motion_estimation_params_name"
                 ]
             }
-        ).fetch1("params", "job_kwargs")
+        ).fetch1("motion_estimation_params", "job_kwargs")
         table, source_row = _live_source_row(
             lineage, key["motion_estimate_id"], selection["source_content_hash"]
         )
@@ -1130,7 +1133,7 @@ class MotionCorrectedFetched(NamedTuple):
     selection : dict
         The ``MotionCorrectedRecordingSelection`` row.
     interpolation_params : dict
-        The interpolation recipe's ``params`` blob.
+        The interpolation recipe's ``motion_interpolation_params`` blob.
     estimate : dict
         The saved estimate's ``_ESTIMATE_APPLICATION_FIELDS``.
     source_content_hash : str
@@ -1256,7 +1259,7 @@ class MotionCorrectedRecording(
                     "motion_interpolation_params_name"
                 ]
             }
-        ).fetch1("params")
+        ).fetch1("motion_interpolation_params")
         estimate_key = {"motion_estimate_id": selection["motion_estimate_id"]}
         estimate = (
             (MotionEstimate & estimate_key)

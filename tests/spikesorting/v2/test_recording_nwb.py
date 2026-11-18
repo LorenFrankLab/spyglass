@@ -548,7 +548,7 @@ def test_recording_semantic_round_trip(xz_roundtrip_session, monkeypatch):
     PreprocessingParameters().insert1(
         {
             "preprocessing_params_name": _ROUNDTRIP_PARAMS_NAME,
-            "params": PreprocessingParamsSchema.model_validate(
+            "preprocessing_params": PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": {"freq_min": 100.0, "freq_max": 400.0}}
             ).model_dump(),
         },

@@ -3,8 +3,8 @@
 Sort each session independently, then match units across sessions.
 
 ``MatcherParameters`` (Lookup)
-    Named matcher configuration; ``matcher`` and ``params`` are validated
-    against the matcher registry at insert.
+    Named matcher configuration; ``matcher`` and ``matcher_params`` are
+    validated against the matcher registry at insert.
 
 ``UnitMatchSelection`` (+ ``Input`` / ``InputRecording`` parts)
     Matcher params plus an explicit set of matching inputs, each a pinned
@@ -167,7 +167,7 @@ class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     matcher_params_name: varchar(64)
     ---
     matcher: varchar(32)         # registered matcher backend (e.g. 'unitmatch')
-    params: blob                 # validated against the per-matcher Pydantic model
+    matcher_params: blob         # validated against the per-matcher Pydantic model
     params_schema_version=1: int
     job_kwargs=null: blob
     """
@@ -176,7 +176,7 @@ class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
         """Validate the matcher name + params against the registry, then insert.
 
         Raises ``UnknownMatcherError`` for an unregistered ``matcher`` and
-        validates ``params`` with that matcher's Pydantic schema. Schema
+        validates ``matcher_params`` with that matcher's Pydantic schema. Schema
         version and duplicate-content checks match the other v2 parameter
         Lookups.
         """
@@ -192,14 +192,15 @@ class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
                 table_name="MatcherParameters",
             )
             # Runs after batch validation so registry/schema errors take
-            # precedence. ``params["seed"]`` is the only seed.
+            # precedence. ``matcher_params["seed"]`` is the only seed.
             for row in validated:
                 job_kwargs = row.get("job_kwargs")
                 if job_kwargs and "random_seed" in job_kwargs:
                     raise ValueError(
                         "MatcherParameters.job_kwargs must not contain "
                         "'random_seed': the waveform-bundle seed is the identity-"
-                        "bearing params 'seed' field. Set 'seed' in params instead."
+                        "bearing matcher_params 'seed' field. Set 'seed' in "
+                        "matcher_params instead."
                     )
             return validated
 
@@ -226,7 +227,7 @@ class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
             {
                 "matcher_params_name": "unitmatch_default",
                 "matcher": "unitmatch",
-                "params": UnitMatchParamsSchema().model_dump(),
+                "matcher_params": UnitMatchParamsSchema().model_dump(),
                 "params_schema_version": UnitMatchParamsSchema().schema_version,
                 "job_kwargs": None,
             }

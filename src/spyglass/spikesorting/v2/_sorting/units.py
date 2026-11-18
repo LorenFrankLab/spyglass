@@ -128,7 +128,7 @@ def build_unit_rows_from_analyzer(
     )
 
     analyzer = load_analyzer_folder(analyzer_folder)
-    peak_sign = resolve_peak_sign(sorter_row["params"])
+    peak_sign = resolve_peak_sign(sorter_row["sorter_params"])
     peak_channels = template_tools.get_template_extremum_channel(
         analyzer, peak_sign=peak_sign, outputs="id"
     )

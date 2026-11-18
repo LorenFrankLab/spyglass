@@ -379,7 +379,7 @@ def test_clusterless_thresholder_end_to_end(polymer_smoke_session):
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": custom_params_name,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
         },

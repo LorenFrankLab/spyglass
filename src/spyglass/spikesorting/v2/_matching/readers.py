@@ -209,7 +209,7 @@ def tracking_params(key):
     sel = (UnitMatchSelection & key).fetch1()
     params = (
         MatcherParameters & {"matcher_params_name": sel["matcher_params_name"]}
-    ).fetch1("params")
+    ).fetch1("matcher_params")
     return resolve_tracking_params(params)
 
 

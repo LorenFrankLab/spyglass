@@ -193,7 +193,7 @@ def insert_inputs(
     )
     matcher_name, params = (
         MatcherParameters & {"matcher_params_name": matcher_params_name}
-    ).fetch1("matcher", "params")
+    ).fetch1("matcher", "matcher_params")
     table_cls._validate_matcher_geometry(choices_by_input, matcher_name, params)
 
     master_row = {**identity, "unitmatch_id": unitmatch_id}
@@ -312,7 +312,7 @@ def prepare_match_inputs(
         validate_match_input_assets(ordered)
         matcher_name, params = (
             MatcherParameters & {"matcher_params_name": matcher_params_name}
-        ).fetch1("matcher", "params")
+        ).fetch1("matcher", "matcher_params")
         get_matcher(matcher_name)
         validate_match_backend_availability(
             matcher_name, needs_pair_inference=len(ordered) >= 2

@@ -113,7 +113,7 @@ def motion_estimate_report(
                         "motion_interpolation_params_name"
                     ]
                 }
-            ).fetch1("params")
+            ).fetch1("motion_interpolation_params")
         )["border_mode"]
 
     motion = _motion.motion_from_storage_dict(row["motion"])

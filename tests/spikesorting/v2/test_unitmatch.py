@@ -707,7 +707,7 @@ def _ensure_minirec_clusterless_params():
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": SMOKE_CLUSTERLESS_PARAMS,
+            "sorter_params": SMOKE_CLUSTERLESS_PARAMS,
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -846,7 +846,7 @@ def test_matcher_parameters_rejects_unknown_matcher(dj_conn):
             {
                 "matcher_params_name": "typo_matcher",
                 "matcher": "unitmatchh",  # typo
-                "params": {},
+                "matcher_params": {},
             }
         )
     assert len(MatcherParameters & {"matcher_params_name": "typo_matcher"}) == 0
@@ -864,7 +864,7 @@ def test_matcher_parameters_validates_params_per_matcher(dj_conn):
             {
                 "matcher_params_name": "bad_params",
                 "matcher": "unitmatch",
-                "params": {"match_threshold": 5.0},  # > 1.0
+                "matcher_params": {"match_threshold": 5.0},  # > 1.0
             }
         )
     assert len(MatcherParameters & {"matcher_params_name": "bad_params"}) == 0
@@ -882,7 +882,7 @@ def test_matcher_parameters_bulk_insert_is_validated(dj_conn):
                 {
                     "matcher_params_name": "bulk_typo",
                     "matcher": "unitmatchh",  # typo
-                    "params": {},
+                    "matcher_params": {},
                 }
             ]
         )
@@ -906,7 +906,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
     MatcherParameters.insert_default()
     default_params = (
         MatcherParameters & {"matcher_params_name": "unitmatch_default"}
-    ).fetch1("params")
+    ).fetch1("matcher_params")
 
     class _OtherMatcher:
         name = "dup_scope_matcher"
@@ -927,7 +927,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
             {
                 "matcher_params_name": "other_same_params",
                 "matcher": "dup_scope_matcher",
-                "params": dict(default_params),
+                "matcher_params": dict(default_params),
             }
         )
         assert len(
@@ -939,7 +939,7 @@ def test_matcher_parameters_duplicate_content_is_matcher_scoped(dj_conn):
                 {
                     "matcher_params_name": "unitmatch_dup",
                     "matcher": "unitmatch",
-                    "params": UnitMatchParamsSchema().model_dump(),
+                    "matcher_params": UnitMatchParamsSchema().model_dump(),
                 }
             )
     finally:
@@ -1106,12 +1106,12 @@ def _plant_sort_on_first_member(grp, sorter_params_name, samples_by_unit):
     default_ms5 = (
         SorterParameters
         & {"sorter": "mountainsort5", "sorter_params_name": _MINIREC_MS5_PARAMS}
-    ).fetch1("params")
+    ).fetch1("sorter_params")
     SorterParameters.insert1(
         {
             "sorter": "mountainsort5",
             "sorter_params_name": sorter_params_name,
-            "params": dict(default_ms5),
+            "sorter_params": dict(default_ms5),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -2061,7 +2061,10 @@ def test_make_runs_full_matcher_table_path(
             {
                 "matcher_params_name": "fixture_pairer_params",
                 "matcher": "fixture_pairer",
-                "params": {"pairs": [[unit_a, unit_b]], "probability": 0.99},
+                "matcher_params": {
+                    "pairs": [[unit_a, unit_b]],
+                    "probability": 0.99,
+                },
             },
             skip_duplicates=True,
         )
@@ -2876,7 +2879,7 @@ def test_v2_unitmatch_polymer_mearec_ground_truth(dj_conn, tmp_path):
         {
             "sorter": "mountainsort5",
             "sorter_params_name": mearec_ms5_params,
-            "params": _validate_params(
+            "sorter_params": _validate_params(
                 _get_sorter_schema("mountainsort5"), {"detect_threshold": 4.0}
             ),
         },
@@ -3453,7 +3456,10 @@ def test_run_v2_unit_match_full_chain(two_session_curated_group, monkeypatch):
             {
                 "matcher_params_name": matcher_name,
                 "matcher": "fixture_pairer",
-                "params": {"pairs": [[unit_a, unit_b]], "probability": 0.99},
+                "matcher_params": {
+                    "pairs": [[unit_a, unit_b]],
+                    "probability": 0.99,
+                },
             },
             skip_duplicates=True,
         )

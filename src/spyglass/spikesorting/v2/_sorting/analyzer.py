@@ -322,7 +322,7 @@ def fetch_waveform_params(waveform_params_name: str) -> dict:
             "AnalyzerWaveformParameters.insert_default(), or insert the custom "
             "row, before resolving its analyzer."
         )
-    return dict(row.fetch1("params"))
+    return dict(row.fetch1("waveform_params"))
 
 
 def _load_analyzer_folder_or_rebuild(
@@ -628,7 +628,7 @@ def load_or_rebuild_analyzer(
         )
 
         return fetch_sorter_analyzer_inputs({"sorting_id": sorting_id})[0].get(
-            "params"
+            "sorter_params"
         )
 
     def restore_recording():
@@ -763,7 +763,7 @@ def load_or_rebuild_analyzer_from_resolved(
         recipe_label=analyzer_folder.name,
         sorting_id=sorting_id,
         validate_analyzer=sort_analyzer_validator(
-            waveform_params, lambda: sorter_row.get("params")
+            waveform_params, lambda: sorter_row.get("sorter_params")
         ),
     )
 
@@ -1048,7 +1048,7 @@ def build_analyzer(
     ).si_create_kwargs()
     if sparsity_kwargs["sparse"]:
         sparsity_kwargs["peak_sign"] = resolve_peak_sign(
-            sorter_row.get("params")
+            sorter_row.get("sorter_params")
         )
 
     # SI's sparse build crashes on an empty sorting.

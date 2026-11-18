@@ -150,7 +150,7 @@ class SortingFetched(NamedTuple):
     sel_row : dict
         The ``SortingSelection`` row, with ``artifact_detection_id`` added.
     sorter_row : dict
-        The matching ``SorterParameters`` row (``sorter``, ``params``,
+        The matching ``SorterParameters`` row (``sorter``, ``sorter_params``,
         ``job_kwargs``).
     nwb_file_name : str
         Anchor NWB file (the single-recording session, or the first concat
@@ -253,6 +253,7 @@ schema = dj.schema("spikesorting_v2_sorting")
 class SorterParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Per-sorter Pydantic-validated parameter blob.
 
+    ``sorter_params`` is validated against the sorter's schema.
     ``insert_default`` ships rows for MS4, MS5, KS4, SC2, TDC2, and
     ``clusterless_thresholder``. Other installed SI sorters validate against
     a generic ``extra="allow"`` schema.
@@ -262,7 +263,7 @@ class SorterParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     sorter: varchar(64)
     sorter_params_name: varchar(128)
     ---
-    params: blob
+    sorter_params: blob
     params_schema_version=0: int
     job_kwargs=null: blob
     execution_params: blob               # validated SorterExecutionParamsSchema dump
@@ -445,7 +446,8 @@ class AnalyzerWaveformParameters(
 ):
     """Tracked window / subsample / whitening for a sort's analyzer recipe.
 
-    - ``params`` is validated by :class:`AnalyzerWaveformParamsSchema`.
+    - ``waveform_params`` is validated by
+      :class:`AnalyzerWaveformParamsSchema`.
     - ``insert_default`` ships region rows: hippocampus 0.5/0.5 ms, cortex
       1.0/2.0 ms, both 20000 spikes.
     - A sort's display recipe follows from its preprocessing recipe, is
@@ -458,14 +460,14 @@ class AnalyzerWaveformParameters(
     definition = """
     waveform_params_name: varchar(64)
     ---
-    params: blob
+    waveform_params: blob
     params_schema_version=3: int
     """
 
     _DEFAULT_CONTENTS: tuple = waveform_params_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
-        """Validate each ``params`` blob + path-safe name, then insert.
+        """Validate each ``waveform_params`` blob + safe name, then insert.
 
         ``allow_duplicate_params=True`` opts out of the duplicate-content
         guard (a second name for an existing blob); see
@@ -958,7 +960,7 @@ class Sorting(
         sel_row : dict
             The ``SortingSelection`` row (with ``artifact_detection_id``).
         sorter_row : dict
-            The ``SorterParameters`` row (``sorter``, ``params``,
+            The ``SorterParameters`` row (``sorter``, ``sorter_params``,
             ``job_kwargs``).
         nwb_file_name : str
             Source NWB file backing the recording selection.
@@ -1128,21 +1130,21 @@ class Sorting(
         Parameters
         ----------
         sorter_row : dict
-            The ``SorterParameters`` row (``sorter``, ``params``,
+            The ``SorterParameters`` row (``sorter``, ``sorter_params``,
             ``job_kwargs``).
 
         Returns
         -------
         sorter : str
         sorter_params : dict
-            ``params`` without Pydantic's ``schema_version``, which the SI
-            sorter wrapper does not accept.
+            ``sorter_params`` without Pydantic's ``schema_version``, which the
+            SI sorter wrapper does not accept.
         job_kwargs : dict
             Resolved job kwargs, shared by the sorter and the analyzer build.
         effective_random_seed : int or None
         """
         sorter = sorter_row["sorter"]
-        sorter_params = dict(sorter_row["params"])
+        sorter_params = dict(sorter_row["sorter_params"])
         sorter_params.pop("schema_version", None)
         job_kwargs = _resolved_job_kwargs(sorter_row["job_kwargs"])
         effective_random_seed = resolve_effective_seed(
@@ -1220,7 +1222,7 @@ class Sorting(
             "concat_recording_id": concat_recording_id,
             "sorter": sorter_row["sorter"],
             "sorter_params_name": sorter_row["sorter_params_name"],
-            "sorter_params": sorter_row["params"],
+            "sorter_params": sorter_row["sorter_params"],
             "execution_params": execution_params,
             "artifact_detection_id": sel_row.get("artifact_detection_id"),
             "display_waveform_params_name": display_waveform_params_name,
@@ -1549,7 +1551,7 @@ class Sorting(
         sorting_id = (self & key).fetch1("sorting_id")
         sorter_params, sorter_job_kwargs = (
             SorterParameters & (SortingSelection & key)
-        ).fetch1("params", "job_kwargs")
+        ).fetch1("sorter_params", "job_kwargs")
         resolved = _resolved_job_kwargs(sorter_job_kwargs)
         resolved.update(kwargs)
         # Lock covers load and in-place compute; reentrant for get_analyzer.

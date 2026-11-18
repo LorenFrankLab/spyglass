@@ -33,7 +33,7 @@ def test_peak_amplitude_is_extremum_on_attributed_electrode(populated_sorting):
     params = (
         SortingSelection * SorterParameters
         & {"sorting_id": populated_sorting["sorting_id"]}
-    ).fetch1("params")
+    ).fetch1("sorter_params")
     peak_sign = resolve_peak_sign(params)
 
     unit_rows = (Sorting.Unit & populated_sorting).fetch(
@@ -145,7 +145,7 @@ def test_row_producer_uses_off_alignment_extremum_and_configured_sign(
     rows = build_unit_rows_from_analyzer(
         sorting=sorting,
         analyzer_folder=folder,
-        sorter_row={"params": sorter_params},
+        sorter_row={"sorter_params": sorter_params},
         electrode_by_id=electrode_by_id,
         sort_group_id=0,
         nwb_file_name="synthetic.nwb",
@@ -226,7 +226,7 @@ def test_sparse_analyzer_retains_the_sorter_polarity_peak(
         sorting,
         recording,
         {"sorting_id": "polarity"},
-        sorter_row={"params": sorter_params},
+        sorter_row={"sorter_params": sorter_params},
         job_kwargs={"n_jobs": 1, "progress_bar": False, "random_seed": 0},
         analyzer_folder=folder,
         waveform_params=waveform_params,
@@ -234,7 +234,7 @@ def test_sparse_analyzer_retains_the_sorter_polarity_peak(
     rows = build_unit_rows_from_analyzer(
         sorting=sorting,
         analyzer_folder=folder,
-        sorter_row={"params": sorter_params},
+        sorter_row={"sorter_params": sorter_params},
         electrode_by_id={
             electrode_id: {
                 "nwb_file_name": "synthetic.nwb",
@@ -321,7 +321,7 @@ def test_unit_rows_keep_each_units_channel_amplitude_and_count(tmp_path):
     rows = build_unit_rows_from_analyzer(
         sorting=sorting,
         analyzer_folder=folder,
-        sorter_row={"params": {"peak_sign": "neg"}},
+        sorter_row={"sorter_params": {"peak_sign": "neg"}},
         electrode_by_id=electrode_by_id,
         sort_group_id=0,
         nwb_file_name="synthetic.nwb",

@@ -378,7 +378,7 @@ def sorter_applies_internal_motion_correction(sorter: str, params) -> bool:
     sorter : str
         The ``sorter`` of a ``SorterParameters`` row.
     params : Mapping
-        That row's ``params`` blob.
+        That row's ``sorter_params`` blob.
 
     Returns
     -------
@@ -429,7 +429,7 @@ def reject_internal_motion_correction(
     sorter : str
         The ``sorter`` of a ``SorterParameters`` row.
     params : Mapping
-        That row's ``params`` blob.
+        That row's ``sorter_params`` blob.
     sorter_params_name : str
         That row's name, for the message.
 
@@ -596,6 +596,6 @@ def _get_sorter_schema(sorter_name: str) -> type[BaseModel]:
     Returns
     -------
     type[pydantic.BaseModel]
-        The Pydantic class to validate the row's ``params`` blob against.
+        The Pydantic class to validate the row's ``sorter_params`` against.
     """
     return _SORTER_SCHEMAS.get(sorter_name, GenericSorterParamsSchema)

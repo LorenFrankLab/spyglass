@@ -768,7 +768,7 @@ def test_clone_pipeline_preset_name_collision_different_content_raises(
     PreprocessingParameters.insert1(
         {
             "preprocessing_params_name": new_name,
-            "params": PreprocessingParamsSchema.model_validate(
+            "preprocessing_params": PreprocessingParamsSchema.model_validate(
                 {"bandpass_filter": {"freq_min": 777.0, "freq_max": 6000.0}}
             ).model_dump(),
         }
@@ -1638,7 +1638,7 @@ def _insert_unmapped_preprocessing_row(name: str) -> None:
     PreprocessingParameters.insert1(
         {
             "preprocessing_params_name": name,
-            "params": {
+            "preprocessing_params": {
                 "bandpass_filter": {"freq_min": 500.0, "freq_max": 6000.0}
             },
         },
@@ -1697,10 +1697,10 @@ def test_clone_refuses_an_existing_different_waveform_mapping(
     params = (
         PreprocessingParameters
         & {"preprocessing_params_name": HIPPOCAMPUS_PREPROC}
-    ).fetch1("params")
+    ).fetch1("preprocessing_params")
     params["bandpass_filter"]["freq_min"] = 700.0
     PreprocessingParameters.insert1(
-        {"preprocessing_params_name": new_name, "params": params},
+        {"preprocessing_params_name": new_name, "preprocessing_params": params},
         allow_duplicate_params=True,
     )
     PreprocessingWaveformParameters.insert1(
@@ -1778,7 +1778,7 @@ def test_shipped_clusterless_preset_is_the_hippocampus_60uv_recipe():
     columns = (
         "sorter",
         "sorter_params_name",
-        "params",
+        "sorter_params",
         "params_schema_version",
         "job_kwargs",
         "execution_params",
@@ -1790,7 +1790,7 @@ def test_shipped_clusterless_preset_is_the_hippocampus_60uv_recipe():
     }
     sorter_row = rows[("clusterless_thresholder", preset.sorter_params_name)]
     params = _get_sorter_schema("clusterless_thresholder").model_validate(
-        sorter_row["params"]
+        sorter_row["sorter_params"]
     )
     assert params.detect_threshold == 60.0
     assert params.threshold_unit == "uv"

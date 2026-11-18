@@ -19,6 +19,7 @@ from spyglass.spikesorting.v2._core.recipe_catalog import (
 from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
     parameter_row_fingerprint,
+    params_column,
 )
 from spyglass.spikesorting.v2._params.artifact_detection import (
     ArtifactDetectionParamsSchema,
@@ -323,7 +324,7 @@ def describe_pipeline_preset(name: str) -> "pd.DataFrame":
             preset_name=name,
         )
         params, params_schema_version = rel.fetch1(
-            "params", "params_schema_version"
+            params_column(rel.heading.names), "params_schema_version"
         )
         return {
             "params": _jsonable_blob(params),
@@ -777,8 +778,10 @@ def clone_pipeline_preset(
     ``PipelinePreset``; untouched stages reuse the base rows. Re-running with
     identical overrides is a no-op, in any session.
 
-    Each override key is a dotted path into one stage's ``params`` blob,
-    e.g. ``detect_threshold=4.0`` or ``**{"bandpass_filter.freq_min": 700.0}``.
+    Each override key is a dotted path into one stage's content blob
+    (``preprocessing_params``, ``artifact_detection_params`` or
+    ``sorter_params``), without the column name, e.g.
+    ``detect_threshold=4.0`` or ``**{"bandpass_filter.freq_min": 700.0}``.
     Keys absent from every blob are rejected. ``job_kwargs`` and
     ``execution_params`` are copied from the base row.
 
@@ -887,9 +890,10 @@ def clone_pipeline_preset(
             row=stage["base_row_name"],
             preset_name=base_name,
         )
+        column = params_column(stage["pk_field"])
         if stage["sorter"] is not None:
             params, psv, exec_params, exec_psv = rel.fetch1(
-                "params",
+                column,
                 "params_schema_version",
                 "execution_params",
                 "execution_params_schema_version",
@@ -897,7 +901,7 @@ def clone_pipeline_preset(
             stage["base_execution_params"] = _jsonable_blob(exec_params)
             stage["base_execution_params_schema_version"] = int(exec_psv)
         else:
-            params, psv = rel.fetch1("params", "params_schema_version")
+            params, psv = rel.fetch1(column, "params_schema_version")
         stage["base_params"] = _jsonable_blob(params)
         stage["base_params_schema_version"] = int(psv)
         stage["base_job_kwargs"] = _fetch_job_kwargs(rel)
@@ -929,10 +933,12 @@ def clone_pipeline_preset(
     with PreprocessingParameters._safe_context():
         for name in touched:
             stage = stages[name]
+            column = params_column(stage["pk_field"])
             derived_fp = _fingerprint(
                 stage,
                 {
-                    "params": derived_params[name],
+                    stage["pk_field"]: new_name,
+                    column: derived_params[name],
                     "params_schema_version": stage[
                         "base_params_schema_version"
                     ],
@@ -961,7 +967,7 @@ def clone_pipeline_preset(
 
             row = {
                 stage["pk_field"]: new_name,
-                "params": derived_params[name],
+                column: derived_params[name],
             }
             if "job_kwargs" in stage["table"].heading.names:
                 row["job_kwargs"] = stage["base_job_kwargs"]

@@ -40,7 +40,7 @@ def test_masked_analyzer_fresh_process_and_derivative(
         sorting,
         masked,
         {"sorting_id": "masked-reload"},
-        sorter_row={"sorter": "mountainsort5", "params": {}},
+        sorter_row={"sorter": "mountainsort5", "sorter_params": {}},
         job_kwargs={"n_jobs": 1, "random_seed": 0},
         analyzer_folder=folder,
         waveform_params={

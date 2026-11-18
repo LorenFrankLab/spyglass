@@ -483,16 +483,16 @@ def test_insert_row_to_dict_normalizes_and_rejects_bad_shapes():
         _insert_row_to_dict,
     )
 
-    names = ("sorter", "sorter_params_name", "params")
+    names = ("sorter", "sorter_params_name", "sorter_params")
     # Mapping passes through as a shallow copy.
-    src = {"sorter": "mountainsort4", "params": {"x": 1}}
+    src = {"sorter": "mountainsort4", "sorter_params": {"x": 1}}
     out = _insert_row_to_dict(src, names)
     assert out == src and out is not src
     # Positional tuple zips against the heading order.
     assert _insert_row_to_dict(("mountainsort4", "name", {"x": 1}), names) == {
         "sorter": "mountainsort4",
         "sorter_params_name": "name",
-        "params": {"x": 1},
+        "sorter_params": {"x": 1},
     }
     # A str/bytes row raises.
     for bad in ("params", b"params"):
@@ -546,8 +546,8 @@ def test_clusterless_default_row_ships_noise_levels_one(dj_conn):
             "sorter_params_name": "default",
         }
     ).fetch1()
-    assert row["params"]["detect_threshold"] == 100.0
-    assert row["params"]["noise_levels"] == [1.0], (
+    assert row["sorter_params"]["detect_threshold"] == 100.0
+    assert row["sorter_params"]["noise_levels"] == [1.0], (
         "Shipped clusterless `default` row dropped the explicit "
         "noise_levels=[1.0] opt-in; production behavior has silently "
         "regressed from raw-uV semantics to MAD-multiplier semantics."
@@ -944,7 +944,7 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
         & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
     ).fetch1()
     assert clusterless["params_schema_version"] == 4
-    assert clusterless["params"]["schema_version"] == 4
+    assert clusterless["sorter_params"]["schema_version"] == 4
 
     for name in (
         "default",
@@ -957,7 +957,7 @@ def test_shipped_rows_carry_current_params_schema_version(dj_conn):
             PreprocessingParameters & {"preprocessing_params_name": name}
         ).fetch1()
         assert row["params_schema_version"] == 4, name
-        assert row["params"]["schema_version"] == 4, name
+        assert row["preprocessing_params"]["schema_version"] == 4, name
 
 
 # ---------- bulk-insert validation -----------------------------------------
@@ -972,13 +972,13 @@ _BULK_INSERT_CASES = [
         {
             "sorter": "mountainsort4",
             "sorter_params_name": "_pytest_bulk_a",
-            "params": MountainSort4Schema().model_dump(),
+            "sorter_params": MountainSort4Schema().model_dump(),
             "params_schema_version": 1,
         },
         {
             "sorter": "mountainsort4",
             "sorter_params_name": "_pytest_bulk_b",
-            "params": MountainSort4Schema().model_dump(),
+            "sorter_params": MountainSort4Schema().model_dump(),
             "params_schema_version": 1,
         },
         id="SorterParameters",
@@ -988,12 +988,12 @@ _BULK_INSERT_CASES = [
         "ArtifactDetectionParameters",
         {
             "artifact_detection_params_name": "_pytest_bulk_a",
-            "params": ArtifactDetectionParamsSchema().model_dump(),
+            "artifact_detection_params": ArtifactDetectionParamsSchema().model_dump(),
             "params_schema_version": 2,
         },
         {
             "artifact_detection_params_name": "_pytest_bulk_b",
-            "params": ArtifactDetectionParamsSchema().model_dump(),
+            "artifact_detection_params": ArtifactDetectionParamsSchema().model_dump(),
             "params_schema_version": 2,
         },
         id="ArtifactDetectionParameters",
@@ -1003,12 +1003,12 @@ _BULK_INSERT_CASES = [
         "PreprocessingParameters",
         {
             "preprocessing_params_name": "_pytest_bulk_a",
-            "params": PreprocessingParamsSchema().model_dump(),
+            "preprocessing_params": PreprocessingParamsSchema().model_dump(),
             "params_schema_version": PREPROCESSING_SCHEMA_VERSION,
         },
         {
             "preprocessing_params_name": "_pytest_bulk_b",
-            "params": PreprocessingParamsSchema().model_dump(),
+            "preprocessing_params": PreprocessingParamsSchema().model_dump(),
             "params_schema_version": PREPROCESSING_SCHEMA_VERSION,
         },
         id="PreprocessingParameters",
@@ -1030,6 +1030,8 @@ def test_param_lookup_bulk_insert_validates(
     import copy
     import importlib
 
+    from spyglass.spikesorting.v2._core.lookup_validation import params_column
+
     Table = getattr(importlib.import_module(module_path), cls_name)
     table = Table()
     pk = table.primary_key
@@ -1043,8 +1045,9 @@ def test_param_lookup_bulk_insert_validates(
 
     # An invalid params blob: a stray key tripped by ``extra="forbid"``.
     invalid = copy.deepcopy(valid_a)
-    invalid["params"] = {
-        **invalid["params"],
+    column = params_column(valid_a)
+    invalid[column] = {
+        **invalid[column],
         "definitely_not_a_real_field": 1,
     }
 

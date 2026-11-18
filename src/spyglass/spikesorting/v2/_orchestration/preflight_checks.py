@@ -231,7 +231,7 @@ def kilosort4_double_reference_warning(
 
     if sorter_row is None or sorter_row["sorter"] != "kilosort4":
         return None
-    if not dict(sorter_row["params"] or {}).get("do_CAR", True):
+    if not dict(sorter_row["sorter_params"] or {}).get("do_CAR", True):
         return None
     modes = (
         SortGroupV2
@@ -374,7 +374,7 @@ def _check_sorter_param_rows(
         sorter_row = sorter_params_query.fetch1()
         try:
             validate_sorter_params_against_wrapper(
-                sorter_row["sorter"], sorter_row["params"]
+                sorter_row["sorter"], sorter_row["sorter_params"]
             )
         except ValueError as exc:
             check("sorter_params_valid", False, str(exc))
@@ -628,7 +628,9 @@ def _check_motion_stage(
             )
     if motion_mode == "apply" and sorter_row is not None:
         sorter_motion = sorter_motion_correction_problem(
-            bundle.sorter, sorter_row["params"], bundle.sorter_params_name
+            bundle.sorter,
+            sorter_row["sorter_params"],
+            bundle.sorter_params_name,
         )
         check(
             "sorter_motion_correction_off",

@@ -286,7 +286,7 @@ def test_detected_artifacts_survive_concat_rebuild_and_member_export(
         ArtifactDetectionParameters.insert1(
             {
                 "artifact_detection_params_name": recipe,
-                "params": {
+                "artifact_detection_params": {
                     "amplitude_threshold_uv": threshold,
                     "proportion_above_threshold": 0.25,
                     "min_length_s": 0.001,
@@ -783,7 +783,7 @@ def test_member_artifact_failure_retry_and_reuse(
     ArtifactDetectionParameters.insert1(
         {
             "artifact_detection_params_name": name,
-            "params": {
+            "artifact_detection_params": {
                 "amplitude_threshold_uv": threshold,
                 "proportion_above_threshold": 0.25,
                 "min_length_s": 0.001,

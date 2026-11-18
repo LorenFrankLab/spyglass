@@ -278,7 +278,7 @@ def _resource_notes(
         ).fetch(as_dict=True)
     )
     if len(rows) == 1 and sampling_rate_hz:
-        params = dict(rows[0]["params"])
+        params = dict(rows[0]["waveform_params"])
         sparsity = SparsityParams.model_validate(params["sparsity"])
         n_samples = int(
             round(

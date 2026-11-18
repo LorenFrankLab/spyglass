@@ -13,6 +13,7 @@ from spyglass.spikesorting.v2._core.table_integrity import (
     _insert_parameter_rows,
 )
 from spyglass.spikesorting.v2._core.lookup_validation import (
+    params_column,
     validate_lookup_rows,
 )
 
@@ -30,9 +31,14 @@ class _InsertSink:
 
 
 class _Table(ImmutableParamsLookup, _InsertSink):
-    primary_key = ["params_name"]
+    primary_key = ["probe_params_name"]
     heading = SimpleNamespace(
-        names=["params_name", "params", "params_schema_version", "job_kwargs"]
+        names=[
+            "probe_params_name",
+            "probe_params",
+            "params_schema_version",
+            "job_kwargs",
+        ]
     )
 
     def __init__(self, stored=()):
@@ -45,7 +51,11 @@ class _Table(ImmutableParamsLookup, _InsertSink):
 
 
 def _row(name, threshold=1, **extra):
-    return {"params_name": name, "params": {"threshold": threshold}, **extra}
+    return {
+        "probe_params_name": name,
+        "probe_params": {"threshold": threshold},
+        **extra,
+    }
 
 
 def _insert(table, rows, **kwargs):
@@ -54,7 +64,7 @@ def _insert(table, rows, **kwargs):
         rows,
         insert_rows=table.insert,
         table_name="TestParameters",
-        name_attr="params_name",
+        name_attr="probe_params_name",
         schema_for=lambda _row: _Params,
         **kwargs,
     )
@@ -72,7 +82,7 @@ def test_generator_and_positional_rows_normalize_before_one_insert():
     )
     assert len(table.writes) == 1
     rows, replace, args, flags = table.writes[0]
-    assert [row["params"]["threshold"] for row in rows] == [2.0, 3.0]
+    assert [row["probe_params"]["threshold"] for row in rows] == [2.0, 3.0]
     assert [row["params_schema_version"] for row in rows] == [1, 1]
     assert flags == {"skip_duplicates": True, "ignore_extra_fields": True}
     assert replace is False and args == ()
@@ -118,8 +128,8 @@ def test_duplicate_content_in_one_batch_prevents_any_insert():
 
 def test_reinsertion_and_duplicate_escape_keep_datajoint_flags():
     normalized = {
-        "params_name": "existing",
-        "params": {"schema_version": 1, "threshold": 1.0},
+        "probe_params_name": "existing",
+        "probe_params": {"schema_version": 1, "threshold": 1.0},
         "params_schema_version": 1,
     }
     table = _Table([normalized])
@@ -253,15 +263,16 @@ def test_parameter_table_adapters_preserve_insert_contract(
             rows = [first] if insert.__name__ == "insert" else first
             with pytest.raises(dj.errors.DataJointError, match="replace=True"):
                 insert(rows, allow_duplicate_params=True, replace=True)
-        assert (table & keys[0]).fetch1("params") == original["params"]
+        column = params_column(name_attr)
+        assert (table & keys[0]).fetch1(column) == original[column]
     finally:
         (table & keys).delete_quick()
 
 
 def _stored(name, threshold):
     return {
-        "params_name": name,
-        "params": {"schema_version": 1, "threshold": float(threshold)},
+        "probe_params_name": name,
+        "probe_params": {"schema_version": 1, "threshold": float(threshold)},
         "params_schema_version": 1,
     }
 
@@ -305,5 +316,5 @@ def test_insert_missing_defaults_skips_stored_names_whatever_their_content():
     )
     assert len(table.writes) == 1
     rows, _replace, _args, flags = table.writes[0]
-    assert [row["params_name"] for row in rows] == ["new"]
+    assert [row["probe_params_name"] for row in rows] == ["new"]
     assert flags == {"skip_duplicates": True}

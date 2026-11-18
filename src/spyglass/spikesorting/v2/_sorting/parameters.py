@@ -70,11 +70,11 @@ def validate_sorter_rows(rows, heading_names, non_si_sorters) -> list:
                 "sorter from spikeinterface.sorters.available_sorters()."
             )
         # Permissive schemas pass unknown keys through.
-        validate_sorter_params_against_wrapper(sorter, row["params"])
+        validate_sorter_params_against_wrapper(sorter, row["sorter_params"])
         # Container provenance lives only on ``execution_params``; the
         # permissive schemas would otherwise pass these keys through.
         reject_reserved_execution_keys(
-            row["params"], context="SorterParameters params blob"
+            row["sorter_params"], context="SorterParameters sorter_params blob"
         )
         reject_reserved_execution_keys(
             row.get("job_kwargs"), context="SorterParameters job_kwargs"
@@ -183,7 +183,7 @@ def legacy_si_sorter_rows() -> list:
             {
                 "sorter": sorter,
                 "sorter_params_name": "default",
-                "params": validated,
+                "sorter_params": validated,
                 "params_schema_version": _params_schema_version(validated),
                 "job_kwargs": None,
             }

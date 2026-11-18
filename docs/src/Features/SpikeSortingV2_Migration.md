@@ -247,6 +247,19 @@ the [CHANGELOG](../CHANGELOG.md) release notes show.
     - `SpikeSorterParameters.sorter_param_name` is
         `SorterParameters.sorter_params_name`. A v1 restriction
         `{"sorter_param_name": ...}` matches nothing on v2 tables.
+    - Each parameter table's content blob is `{stage}_params`, after its
+        `{stage}_params_name` key. Insert and fetch it by that name; a row
+        with a `params` key is refused.
+
+        | v1 column                                            | v2 column                                                   |
+        | ---------------------------------------------------- | ----------------------------------------------------------- |
+        | `SpikeSortingPreprocessingParameters.preproc_params` | `PreprocessingParameters.preprocessing_params`              |
+        | `ArtifactDetectionParameters.artifact_params`        | `ArtifactDetectionParameters.artifact_detection_params`     |
+        | `SpikeSorterParameters.sorter_params`                | `SorterParameters.sorter_params`                            |
+        | `WaveformParameters.waveform_params`                 | `AnalyzerWaveformParameters.waveform_params`                |
+        | (no v1 equivalent)                                   | `MotionEstimationParameters.motion_estimation_params`       |
+        | (no v1 equivalent)                                   | `MotionInterpolationParameters.motion_interpolation_params` |
+        | (no v1 equivalent)                                   | `MatcherParameters.matcher_params`                          |
     - Artifact `IntervalList` rows are tagged
         `pipeline="spikesorting_artifact_detection_v2"` (v1:
         `spikesorting_artifact_v1`).
@@ -297,8 +310,8 @@ Name and content rules:
     changes, so a `recording_id` / `sorting_id` derived from a name stays
     reproducible.
 - **Content fingerprints.** Each row's fingerprint covers its validated
-    `params`, schema version, and job kwargs where the table has them (not the
-    name; `SorterParameters` is scoped per sorter). `describe_parameter_rows()`
+    content blob, schema version, and job kwargs where the table has them (not
+    the name; `SorterParameters` is scoped per sorter). `describe_parameter_rows()`
     lists every row with its fingerprint, whether it is a shipped default, the
     presets that use it, and the name it duplicates.
 - **Duplicate content is refused.** A second name for existing content raises

@@ -262,7 +262,7 @@ def matcher_run_provenance(matcher_name: str, params, job_kwargs) -> tuple:
     matcher_name : str
         Registered matcher name.
     params : dict
-        The ``MatcherParameters`` row's ``params``.
+        The ``MatcherParameters`` row's ``matcher_params``.
     job_kwargs : dict or None
         The row's job kwargs blob.
 

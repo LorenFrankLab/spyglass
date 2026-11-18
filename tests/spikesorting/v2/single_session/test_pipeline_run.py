@@ -364,7 +364,7 @@ def test_run_v2_pipeline_clusterless_preset(polymer_smoke_session):
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": CLUSTERLESS_60UV,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
         },
@@ -705,7 +705,7 @@ def test_verify_v2_default_catalog_flags_stale(dj_conn):
         & {"preprocessing_params_name": row["preprocessing_params_name"]}
     )
     key = {"preprocessing_params_name": name}
-    original = (PreprocessingParameters & key).fetch1("params")
+    original = (PreprocessingParameters & key).fetch1("preprocessing_params")
     mutated = dict(original)
     mutated["min_segment_length"] = (
         float(original.get("min_segment_length", 1.0)) + 5.0
@@ -713,7 +713,7 @@ def test_verify_v2_default_catalog_flags_stale(dj_conn):
     try:
         # Maintenance escape hatch: mutate the stored blob in place.
         PreprocessingParameters().update1(
-            {**key, "params": mutated}, allow_param_mutation=True
+            {**key, "preprocessing_params": mutated}, allow_param_mutation=True
         )
         stale = verify_v2_default_catalog()
         assert any(
@@ -725,7 +725,7 @@ def test_verify_v2_default_catalog_flags_stale(dj_conn):
             verify_v2_default_catalog(strict=True)
     finally:
         PreprocessingParameters().update1(
-            {**key, "params": original}, allow_param_mutation=True
+            {**key, "preprocessing_params": original}, allow_param_mutation=True
         )
     assert verify_v2_default_catalog() == [], "restored catalog should be clean"
 
@@ -750,14 +750,14 @@ def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
         & {"preprocessing_params_name": row["preprocessing_params_name"]}
     )
     key = {"preprocessing_params_name": name}
-    original = (PreprocessingParameters & key).fetch1("params")
+    original = (PreprocessingParameters & key).fetch1("preprocessing_params")
     mutated = dict(original)
     mutated["min_segment_length"] = (
         float(original.get("min_segment_length", 1.0)) + 5.0
     )
     try:
         PreprocessingParameters().update1(
-            {**key, "params": mutated}, allow_param_mutation=True
+            {**key, "preprocessing_params": mutated}, allow_param_mutation=True
         )
         with caplog.at_level(logging.WARNING):
             initialize_v2_defaults()  # the non-strict audit must warn
@@ -766,7 +766,7 @@ def test_initialize_v2_defaults_runs_catalog_audit(dj_conn, caplog):
         ), "initialize_v2_defaults did not warn on a stale stored default"
     finally:
         PreprocessingParameters().update1(
-            {**key, "params": original}, allow_param_mutation=True
+            {**key, "preprocessing_params": original}, allow_param_mutation=True
         )
 
 

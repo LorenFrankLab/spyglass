@@ -489,7 +489,9 @@ def test_v2_lookup_tables_validate_via_pydantic():
 
     bogus_pydantic_row = {
         "preprocessing_params_name": "v2_integrity_test_bogus",
-        "params": {"bandpass_filter": {"freq_min": "not_a_float"}},
+        "preprocessing_params": {
+            "bandpass_filter": {"freq_min": "not_a_float"}
+        },
         "params_schema_version": 2,
     }
     with pytest.raises((ValueError, TypeError), match="freq_min"):
@@ -497,7 +499,7 @@ def test_v2_lookup_tables_validate_via_pydantic():
 
     bogus_artifact_row = {
         "artifact_detection_params_name": "v2_integrity_test_bogus",
-        "params": {"amplitude_threshold_uv": "not_a_float"},
+        "artifact_detection_params": {"amplitude_threshold_uv": "not_a_float"},
         "params_schema_version": 2,
         "job_kwargs": None,
     }
@@ -507,7 +509,7 @@ def test_v2_lookup_tables_validate_via_pydantic():
     bogus_sorter_row = {
         "sorter": "clusterless_thresholder",
         "sorter_params_name": "v2_integrity_test_bogus",
-        "params": {"detect_threshold": "not_a_float"},
+        "sorter_params": {"detect_threshold": "not_a_float"},
         "params_schema_version": 2,
         "job_kwargs": None,
     }

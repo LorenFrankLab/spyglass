@@ -58,7 +58,7 @@ _FORBIDDEN_ANY_STEP = frozenset(
 
 
 class MotionEstimationParamsSchema(BaseModel):
-    """Validated ``params`` for a ``MotionEstimationParameters`` row.
+    """Validated ``motion_estimation_params`` of a parameter row.
 
     Attributes
     ----------

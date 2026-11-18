@@ -292,7 +292,7 @@ def test_clusterless_default_row_ships_noise_levels_one():
     params = (
         SorterParameters
         & {"sorter": "clusterless_thresholder", "sorter_params_name": "default"}
-    ).fetch1("params")
+    ).fetch1("sorter_params")
     assert params["noise_levels"] == [1.0]
     # detect_threshold=100 comes from the schema default.
     assert params["detect_threshold"] == 100.0

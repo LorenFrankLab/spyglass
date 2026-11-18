@@ -123,7 +123,7 @@ def test_recording_nwb_carries_source_provenance(populated_sorting):
         & {"preprocessing_params_name": sel["preprocessing_params_name"]}
     ).fetch1()
     bad_channel_handling = PreprocessingParamsSchema.model_validate(
-        pp_row["params"]
+        pp_row["preprocessing_params"]
     ).bad_channel_handling
 
     analysis_file_name = (Recording & {"recording_id": recording_id}).fetch1(

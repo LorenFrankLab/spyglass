@@ -585,6 +585,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 `UnitMatch.Pair.match_probability` and
         `TrackedUnit.median_match_probability` are `double`, so the table, the
         pairs NWB and the tracking threshold see the same value #1609
+    - v2 parameter tables name their content blob `{stage}_params` after the
+        `{stage}_params_name` key (`preprocessing_params`, `sorter_params`,
+        `artifact_detection_params`, `waveform_params`,
+        `motion_estimation_params`, `motion_interpolation_params`,
+        `matcher_params`); a row with a `params` key is refused. No
+        fingerprint or id changes #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

@@ -1133,9 +1133,9 @@ def test_recompute_metric_verify_independent_of_display_cache(
     metric_recipe = next(
         r["waveform_params_name"]
         for r in AnalyzerWaveformParameters().fetch(
-            "waveform_params_name", "params", as_dict=True
+            "waveform_params_name", "waveform_params", as_dict=True
         )
-        if r["params"].get("whiten")
+        if r["waveform_params"].get("whiten")
     )
     metric_folder = analyzer_path(sort_key["sorting_id"], metric_recipe)
     Sorting().get_analyzer(sort_key, waveform_params_name=metric_recipe)

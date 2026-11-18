@@ -223,7 +223,7 @@ def fetch_motion_correction(corrected_key, sorter_row, source):
 
     reject_internal_motion_correction(
         sorter_row["sorter"],
-        sorter_row["params"],
+        sorter_row["sorter_params"],
         sorter_params_name=sorter_row["sorter_params_name"],
     )
     selection = (MotionCorrectedRecordingSelection & corrected_key).fetch1()

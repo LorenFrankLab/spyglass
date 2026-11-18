@@ -650,7 +650,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": sorter_params_name,
                 # ``noise_levels`` omitted: SI uses per-channel MAD.
-                "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+                "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
                 "params_schema_version": 4,
                 "job_kwargs": None,
             },
@@ -766,13 +766,13 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
             (
                 PreprocessingParameters
                 & {"preprocessing_params_name": preproc_name_v2}
-            ).fetch1("params")
+            ).fetch1("preprocessing_params")
         ),
         "canonical_artifact_params": canonical_artifact(
             (
                 ArtifactDetectionParameters
                 & {"artifact_detection_params_name": artifact_name_meta}
-            ).fetch1("params")
+            ).fetch1("artifact_detection_params")
         ),
         # An array, not a hash, so float drift between SI versions is
         # compared with isclose.
@@ -785,7 +785,7 @@ def test_v2_real_data_v1_parity(fixture_stem, sort_group_id, dj_conn):
                     "sorter": "clusterless_thresholder",
                     "sorter_params_name": sorter_params_name,
                 }
-            ).fetch1("params"),
+            ).fetch1("sorter_params"),
         ),
     }
     v1_fingerprints = {field: meta[field] for field in _fingerprint_fields}
@@ -1070,7 +1070,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
         {
             "sorter": "mountainsort4",
             "sorter_params_name": sorter_params_name,
-            "params": dict(MS4_60S_POLYMER_PARAMS),
+            "sorter_params": dict(MS4_60S_POLYMER_PARAMS),
             "params_schema_version": 1,
             "job_kwargs": None,
         },
@@ -1187,13 +1187,13 @@ def test_v2_real_data_v1_parity_mountainsort4(
             (
                 PreprocessingParameters
                 & {"preprocessing_params_name": preproc_name_v2}
-            ).fetch1("params")
+            ).fetch1("preprocessing_params")
         ),
         "canonical_artifact_params": canonical_artifact(
             (
                 ArtifactDetectionParameters
                 & {"artifact_detection_params_name": artifact_name_meta}
-            ).fetch1("params")
+            ).fetch1("artifact_detection_params")
         ),
         "artifact_valid_times": _normalize(v2_valid_times),
         "canonical_sorter_params": canonical_sorter(
@@ -1204,7 +1204,7 @@ def test_v2_real_data_v1_parity_mountainsort4(
                     "sorter": "mountainsort4",
                     "sorter_params_name": sorter_params_name,
                 }
-            ).fetch1("params"),
+            ).fetch1("sorter_params"),
         ),
     }
     v1_fingerprints = {field: meta[field] for field in _fingerprint_fields}
@@ -1569,7 +1569,7 @@ def test_clusterless_thresholder_ground_truth(
             {
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": sorter_params_name,
-                "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+                "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
                 "params_schema_version": 4,
                 "job_kwargs": None,
             },

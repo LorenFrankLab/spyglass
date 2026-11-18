@@ -1,8 +1,8 @@
 """Validated parameter schema for the cross-session matcher parameter table.
 
 One schema per registered matcher backend (dispatched by the matcher registry
-in ``matcher_protocol``). ``UnitMatchParamsSchema`` validates the ``params``
-blob of a ``MatcherParameters`` row whose ``matcher == "unitmatch"``.
+in ``matcher_protocol``). ``UnitMatchParamsSchema`` validates the
+``matcher_params`` blob of a ``MatcherParameters`` row whose ``matcher == "unitmatch"``.
 
 The matcher's own internal knobs (UnitMatch's ``default_params``) are resolved
 inside the backend. Shared grouping controls come from ``TrackingParamsSchema``
@@ -43,7 +43,7 @@ class WaveformBundleParamsSchema(BaseModel):
 
 
 class UnitMatchParamsSchema(WaveformBundleParamsSchema, TrackingParamsSchema):
-    """Validated ``params`` for a ``MatcherParameters`` row using UnitMatch.
+    """Validated ``matcher_params`` of a ``MatcherParameters`` UnitMatch row.
 
     Attributes
     ----------

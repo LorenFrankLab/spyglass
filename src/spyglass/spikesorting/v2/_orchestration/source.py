@@ -423,7 +423,7 @@ def _recording_advisories(recording_key: dict) -> list[str]:
         (
             PreprocessingParameters
             & {"preprocessing_params_name": sel["preprocessing_params_name"]}
-        ).fetch1("params")
+        ).fetch1("preprocessing_params")
     )
     if params.phase_shift is not None:
         skipped = phase_shift_skip_warning(

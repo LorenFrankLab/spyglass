@@ -103,14 +103,14 @@ def describe_scientific_setup(
     preprocessing = (
         PreprocessingParameters
         & {"preprocessing_params_name": bundle.preprocessing_params_name}
-    ).fetch("params")
+    ).fetch("preprocessing_params")
     artifacts = (
         (
             ArtifactDetectionParameters
             & {
                 "artifact_detection_params_name": bundle.artifact_detection_params_name
             }
-        ).fetch("params")
+        ).fetch("artifact_detection_params")
         if bundle.artifact_detection_params_name is not None
         else []
     )
@@ -185,7 +185,7 @@ def resolve_preset_sort_config(bundle) -> "dict | None":
     row = rows[0]
     return resolve_sort_config(
         row["sorter"],
-        row["params"],
+        row["sorter_params"],
         job_kwargs=_resolved_job_kwargs(row["job_kwargs"]),
         execution_params=row.get("execution_params"),
     ).as_dict()

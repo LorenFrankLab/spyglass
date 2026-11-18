@@ -202,7 +202,7 @@ def install_fixture_pairer(
             {
                 "matcher_params_name": matcher_params_name,
                 "matcher": matcher_name,
-                "params": {"pairs": pairs, "probability": probability},
+                "matcher_params": {"pairs": pairs, "probability": probability},
             },
             skip_duplicates=True,
         )

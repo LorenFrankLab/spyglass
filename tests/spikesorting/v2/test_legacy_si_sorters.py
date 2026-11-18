@@ -49,7 +49,7 @@ def test_insert_default_legacy_si_sorters_skip_on_missing_sorter(dj_conn):
         & {"sorter": present[0], "sorter_params_name": "default"}
     ).fetch1()
     assert row["params_schema_version"] == 1
-    assert row["params"]["schema_version"] == 1
+    assert row["sorter_params"]["schema_version"] == 1
 
 
 def test_insert_default_legacy_si_sorters_skips_not_installed(
@@ -114,7 +114,7 @@ def test_insert_default_legacy_si_sorters_backfills_local_execution(
     row = (
         SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
     ).fetch1()
-    assert row["params"]["schema_version"] == 1
+    assert row["sorter_params"]["schema_version"] == 1
     assert row["execution_params"]["backend"] == "local"
     assert row["execution_params"]["container_image"] is None
     assert int(row["execution_params_schema_version"]) == 1
@@ -168,8 +168,8 @@ def test_legacy_default_rows_exclude_job_kwargs(dj_conn, monkeypatch, request):
     row = (
         SorterParameters & {"sorter": fake, "sorter_params_name": "default"}
     ).fetch1()
-    assert "n_jobs" not in row["params"]
-    assert "chunk_duration" not in row["params"]
-    assert row["params"]["detect_threshold"] == 5
+    assert "n_jobs" not in row["sorter_params"]
+    assert "chunk_duration" not in row["sorter_params"]
+    assert row["sorter_params"]["detect_threshold"] == 5
     # The seeded blob survives the guard that the insert itself applies.
-    validate_sorter_params_against_wrapper(fake, row["params"])
+    validate_sorter_params_against_wrapper(fake, row["sorter_params"])

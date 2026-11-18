@@ -103,9 +103,9 @@ class MotionRecipe(NamedTuple):
     recipe : dict
         The ``MotionCorrectionParameters`` row.
     estimation_params : dict
-        The named ``MotionEstimationParameters`` row's ``params`` blob.
+        The named row's ``motion_estimation_params`` blob.
     interpolation_params : dict
-        The named ``MotionInterpolationParameters`` row's ``params`` blob.
+        The named row's ``motion_interpolation_params`` blob.
     resolved_estimation : dict
         ``estimation_params`` resolved against the installed SpikeInterface
         (``_motion.estimation.resolve_estimation_params``).
@@ -160,7 +160,7 @@ def resolve_motion_recipe(motion_correction_params_name: str) -> MotionRecipe:
     estimation_params = (
         MotionEstimationParameters
         & {"motion_estimation_params_name": estimation_name}
-    ).fetch1("params")
+    ).fetch1("motion_estimation_params")
     interpolation_params = (
         MotionInterpolationParameters
         & {
@@ -168,7 +168,7 @@ def resolve_motion_recipe(motion_correction_params_name: str) -> MotionRecipe:
                 "motion_interpolation_params_name"
             ]
         }
-    ).fetch1("params")
+    ).fetch1("motion_interpolation_params")
     try:
         resolved = resolve_estimation_params(estimation_params)
     except ValueError as exc:

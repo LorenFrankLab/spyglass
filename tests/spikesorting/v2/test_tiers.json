@@ -654,6 +654,14 @@
     "test_orphan_analyzer_classification.py": {
       "tier": "unit"
     },
+    "test_parameter_content_column.py": {
+      "tier": "unit",
+      "overrides": {
+        "test_bare_params_key_is_refused_with_the_column_name": "db_unit",
+        "test_parameter_fingerprints_and_preset_identity_are_pinned": "db_unit",
+        "test_selection_ids_are_pinned": "pipeline"
+      }
+    },
     "test_parameter_identity.py": {
       "tier": "unit",
       "overrides": {

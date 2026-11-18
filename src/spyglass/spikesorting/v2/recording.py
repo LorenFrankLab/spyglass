@@ -700,7 +700,8 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """Phase-shift + bandpass + bad-channel + reference parameters.
 
-    Validated by :class:`PreprocessingParamsSchema`. Whitening is set in
+    ``preprocessing_params`` is validated by
+    :class:`PreprocessingParamsSchema`. Whitening is set in
     ``SorterParameters`` and ``AnalyzerWaveformParameters`` instead. There is
     no ``job_kwargs`` column: ``Recording`` streams its output in one process.
     """
@@ -708,7 +709,7 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     definition = """
     preprocessing_params_name: varchar(128)
     ---
-    params: blob
+    preprocessing_params: blob
     params_schema_version=4: int
     """
 
@@ -716,7 +717,7 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     _DEFAULT_CONTENTS: tuple = preprocessing_default_contents()
 
     def insert(self, rows, allow_duplicate_params=False, **kwargs):
-        """Insert rows after Pydantic-validating each params blob.
+        """Insert rows after validating each ``preprocessing_params`` blob.
 
         ``allow_duplicate_params=True`` opts out of the duplicate-content
         guard (a second name for an existing blob); see

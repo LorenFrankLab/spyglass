@@ -62,7 +62,7 @@ def _insert_transient_threshold_params():
     ArtifactDetectionParameters().insert1(
         {
             "artifact_detection_params_name": params_name,
-            "params": ArtifactDetectionParamsSchema(
+            "artifact_detection_params": ArtifactDetectionParamsSchema(
                 detect=True,
                 amplitude_threshold_uv=_AMP_THRESH_UV,
                 zscore_threshold=None,
@@ -439,7 +439,7 @@ def test_artifact_masking_preserves_clean_gt_spikes(
     ArtifactDetectionParameters().insert1(
         {
             "artifact_detection_params_name": params_name,
-            "params": ArtifactDetectionParamsSchema(
+            "artifact_detection_params": ArtifactDetectionParamsSchema(
                 detect=True,
                 amplitude_threshold_uv=amp_thresh_uv,
                 zscore_threshold=None,
@@ -505,7 +505,7 @@ def _insert_artifact_params(name, *, n_jobs):
     ArtifactDetectionParameters().insert1(
         {
             "artifact_detection_params_name": name,
-            "params": ArtifactDetectionParamsSchema(
+            "artifact_detection_params": ArtifactDetectionParamsSchema(
                 detect=True,
                 amplitude_threshold_uv=30.0,
                 zscore_threshold=None,
@@ -958,7 +958,7 @@ def test_manual_exclusions_are_persisted_and_compose_with_detection(
     ArtifactDetectionParameters.insert1(
         {
             "artifact_detection_params_name": name,
-            "params": {
+            "artifact_detection_params": {
                 "detect": True,
                 "amplitude_threshold_uv": _AMP_THRESH_UV,
                 "zscore_threshold": None,

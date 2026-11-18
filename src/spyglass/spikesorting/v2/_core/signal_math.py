@@ -562,7 +562,7 @@ def resolve_peak_sign(params) -> str:
     Parameters
     ----------
     params : Mapping or None
-        The validated ``SorterParameters.params`` blob. A non-mapping
+        The validated ``SorterParameters.sorter_params`` blob. A non-mapping
         returns ``"neg"``.
 
     Returns

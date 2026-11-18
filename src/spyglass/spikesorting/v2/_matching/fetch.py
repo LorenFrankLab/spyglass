@@ -166,7 +166,7 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
 
     matcher_name, params, job_kwargs = (
         MatcherParameters & {"matcher_params_name": sel["matcher_params_name"]}
-    ).fetch1("matcher", "params", "job_kwargs")
+    ).fetch1("matcher", "matcher_params", "job_kwargs")
 
     # Resolved here so a relabel before compute cannot change matchable
     # units. Times are UTC ISO strings for a stable DeepHash.

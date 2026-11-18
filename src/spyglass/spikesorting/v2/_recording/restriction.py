@@ -410,7 +410,7 @@ def _stored_save_inputs(
     params = (
         PreprocessingParameters
         & {"preprocessing_params_name": preprocessing_params_name}
-    ).fetch("params")
+    ).fetch("preprocessing_params")
     if sort_valid_times is None or raw_valid_times is None or len(params) != 1:
         return None
     min_segment_length = PreprocessingParamsSchema.model_validate(

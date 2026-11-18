@@ -52,7 +52,7 @@ def stale_corrected_selection_fields(
     selection : dict
         The ``MotionCorrectedRecordingSelection`` row.
     resolved_interpolation_params : dict
-        Its ``MotionInterpolationParameters`` row's ``params`` blob, resolved
+        Its ``motion_interpolation_params`` blob, resolved
         by ``_motion.resolve_interpolation_params``.
     check_spikeinterface_version : bool
         Also compare the installed SpikeInterface version.
@@ -144,7 +144,7 @@ def resolve_estimation_recipe(
     selection : dict
         The ``MotionEstimateSelection`` row.
     params : dict
-        Its ``MotionEstimationParameters`` row's ``params`` blob.
+        Its ``motion_estimation_params`` blob.
 
     Returns
     -------
@@ -186,7 +186,7 @@ def resolve_interpolation_recipe(
     selection : dict
         The ``MotionCorrectedRecordingSelection`` row.
     interpolation_params : dict
-        Its ``MotionInterpolationParameters`` row's ``params`` blob.
+        Its ``motion_interpolation_params`` blob.
     check_spikeinterface_version : bool
         Also compare the installed SpikeInterface version.
 

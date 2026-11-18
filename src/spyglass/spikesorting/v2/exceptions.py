@@ -420,8 +420,8 @@ class TrackedUnitBudgetExceededError(SpikeSortingV2Error, RuntimeError):
     """Raise when the strict tracked-unit graph exceeds its node budget.
 
     Strict-mode clique search is refused above
-    ``MatcherParameters.params["max_strict_nodes"]``. Message names the node
-    count and cap; shrink the session group or raise the cap.
+    ``MatcherParameters.matcher_params["max_strict_nodes"]``. Message names
+    the node count and cap; shrink the session group or raise the cap.
     """
 
 

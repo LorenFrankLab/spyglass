@@ -890,7 +890,7 @@ def build_reference_merged_analyzer(
         sorter_row=sorter_row,
         job_kwargs=job_kwargs,
         waveform_params=dict(
-            resolver._resolve_recipe(waveform_recipe, role)["params"]
+            resolver._resolve_recipe(waveform_recipe, role)["waveform_params"]
         ),
         statistics_spans=Sorting().get_statistics_spans(sorting_key),
         role=role,

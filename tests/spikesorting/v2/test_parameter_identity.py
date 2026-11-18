@@ -611,7 +611,7 @@ def test_duplicate_parameter_content_rejected(dj_conn):
         PreprocessingParameters.insert1(
             {
                 "preprocessing_params_name": "my_copy_of_default",
-                "params": shipped["params"],
+                "preprocessing_params": shipped["preprocessing_params"],
                 "params_schema_version": shipped["params_schema_version"],
             }
         )
@@ -632,7 +632,7 @@ def test_duplicate_parameter_content_escape_hatch(dj_conn):
         PreprocessingParameters.insert1(
             {
                 "preprocessing_params_name": dup_name,
-                "params": shipped["params"],
+                "preprocessing_params": shipped["preprocessing_params"],
                 "params_schema_version": shipped["params_schema_version"],
             },
             allow_duplicate_params=True,
@@ -678,7 +678,11 @@ def test_shipped_preprocessing_fingerprints_unchanged():
         preprocessing_default_contents,
     )
 
-    names = ("preprocessing_params_name", "params", "params_schema_version")
+    names = (
+        "preprocessing_params_name",
+        "preprocessing_params",
+        "params_schema_version",
+    )
     fingerprints = {
         row[0]: parameter_row_fingerprint(
             "PreprocessingParameters", dict(zip(names, row, strict=True))
@@ -721,7 +725,7 @@ def test_preprocessing_insert_rejects_job_kwargs(dj_conn):
         PreprocessingParameters.insert1(
             {
                 "preprocessing_params_name": name,
-                "params": PreprocessingParamsSchema.model_validate(
+                "preprocessing_params": PreprocessingParamsSchema.model_validate(
                     {"bandpass_filter": {"freq_min": 555.0}}
                 ).model_dump(),
                 "job_kwargs": {"n_jobs": 4},
@@ -759,7 +763,7 @@ def test_sorter_duplicate_rejected_scoped_by_sorter(dj_conn):
             {
                 "sorter": "clusterless_thresholder",
                 "sorter_params_name": "my_clusterless_copy",
-                "params": shipped["params"],
+                "sorter_params": shipped["sorter_params"],
                 "params_schema_version": shipped["params_schema_version"],
                 "job_kwargs": shipped["job_kwargs"],
             }
@@ -1128,12 +1132,12 @@ def test_within_batch_duplicate_content_rejected(dj_conn):
     rows = [
         {
             "preprocessing_params_name": "batch_dup_a",
-            "params": blob,
+            "preprocessing_params": blob,
             "params_schema_version": 4,
         },
         {
             "preprocessing_params_name": "batch_dup_b",
-            "params": blob,
+            "preprocessing_params": blob,
             "params_schema_version": 4,
         },
     ]
@@ -1161,7 +1165,7 @@ def test_duplicate_rejected_when_schema_version_column_omitted(dj_conn):
         PreprocessingParameters.insert1(
             {
                 "preprocessing_params_name": "omit_version_copy",
-                "params": shipped["params"],
+                "preprocessing_params": shipped["preprocessing_params"],
                 # params_schema_version deliberately omitted
             }
         )
@@ -1196,10 +1200,15 @@ def test_outer_version_backfilled_for_all_lookups(module_name, schema_name):
         schema_name,
     )
     current = schema.model_fields["schema_version"].default
-    row = {"params": {"schema_version": current}}
+    row = {"probe_params": {"schema_version": current}}
     validated = validate_lookup_rows(
         [row],
-        ["name", "params", "params_schema_version", "job_kwargs"],
+        [
+            "probe_params_name",
+            "probe_params",
+            "params_schema_version",
+            "job_kwargs",
+        ],
         schema_for=lambda _row: schema,
         table_name="BackfillProbe",
     )
@@ -1218,13 +1227,18 @@ def test_outer_version_drift_still_trips_after_backfill():
 
     current = PreprocessingParamsSchema().schema_version
     row = {
-        "params": {"schema_version": current},
+        "probe_params": {"schema_version": current},
         "params_schema_version": current - 1,
     }
     with pytest.raises(ValueError, match="does not match"):
         validate_lookup_rows(
             [row],
-            ["name", "params", "params_schema_version", "job_kwargs"],
+            [
+                "probe_params_name",
+                "probe_params",
+                "params_schema_version",
+                "job_kwargs",
+            ],
             schema_for=lambda _row: PreprocessingParamsSchema,
             table_name="BackfillProbe",
         )

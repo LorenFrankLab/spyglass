@@ -1031,7 +1031,7 @@ def _ensure_clusterless_sorter_params():
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": SMOKE_CLUSTERLESS_PARAMS,
+            "sorter_params": SMOKE_CLUSTERLESS_PARAMS,
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -2327,7 +2327,7 @@ def test_concat_applied_merge_through_curation_and_evaluation(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": two_unit_params,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -2475,7 +2475,7 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": params_name,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,

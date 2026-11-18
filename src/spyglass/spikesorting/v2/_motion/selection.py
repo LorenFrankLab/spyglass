@@ -83,7 +83,7 @@ def insert_estimate_selection(table_cls, key: dict) -> dict:
         insert_default_path="MotionEstimationParameters.insert_default()",
     )
     estimation_params = (MotionEstimationParameters & params_key).fetch1(
-        "params"
+        "motion_estimation_params"
     )
     content_hashes = (source_table & source_key).fetch("content_hash")
     if len(content_hashes) == 0:
@@ -233,7 +233,7 @@ def insert_corrected_selection(table_cls, key: dict) -> dict:
         motion_interpolation_params_name=params_name,
         interpolation_params=(
             MotionInterpolationParameters & params_key
-        ).fetch1("params"),
+        ).fetch1("motion_interpolation_params"),
     )
     explicit = key.get("motion_corrected_recording_id")
     if explicit is not None and uuid.UUID(str(explicit)) != corrected_id:

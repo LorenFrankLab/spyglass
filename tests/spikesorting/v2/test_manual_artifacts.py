@@ -263,7 +263,7 @@ def test_pipeline_runner_applies_manual_exclusions(
         ArtifactDetectionParameters.insert1(
             {
                 "artifact_detection_params_name": name,
-                "params": {
+                "artifact_detection_params": {
                     "amplitude_threshold_uv": float(
                         np.quantile(
                             np.abs(recordings[0].get_traces(return_in_uV=True)),
@@ -282,7 +282,10 @@ def test_pipeline_runner_applies_manual_exclusions(
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": name,
-            "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+            "sorter_params": {
+                "detect_threshold": 100.0,
+                "threshold_unit": "uv",
+            },
         },
         allow_duplicate_params=True,
     )

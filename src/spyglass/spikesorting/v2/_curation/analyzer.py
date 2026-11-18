@@ -174,7 +174,7 @@ def _resolve_recipe(waveform_recipe: str, role: str) -> dict:
             f"AnalyzerWaveformParameters row; got {waveform_recipe!r}."
         )
     row = relation.fetch1()
-    params = dict(row["params"])
+    params = dict(row["waveform_params"])
     expected_purpose = role
     if params.get("purpose") != expected_purpose or bool(
         params.get("whiten")
@@ -600,7 +600,7 @@ def _build_resolved_merged_analyzer(
         ensure_extensions(
             analyzer,
             STANDARD_DISPLAY_ANALYZER_EXTENSIONS,
-            peak_sign=resolve_peak_sign(sorter_row["params"]),
+            peak_sign=resolve_peak_sign(sorter_row["sorter_params"]),
             job_kwargs=job_kwargs,
         )
     return analyzer
@@ -651,7 +651,7 @@ def publish_resolved_merged_analyzer(
         role,
         _build_base,
         validate_analyzer=analyzer_sparsity_validator(
-            lambda: sorter_row.get("params")
+            lambda: sorter_row.get("sorter_params")
         ),
     )
 
@@ -740,7 +740,7 @@ def _resolve_curation_analyzer(
         return fetch_sorter_analyzer_inputs({"sorting_id": row["sorting_id"]})
 
     def sorter_params():
-        return sorter_inputs()[0].get("params")
+        return sorter_inputs()[0].get("sorter_params")
 
     def source_recording():
         recording, _sorting = reconstruct_recording_and_sorting(
@@ -811,7 +811,7 @@ def _resolve_curation_analyzer(
                 sorting_id=row["sorting_id"],
                 sorter_row=sorter_row,
                 job_kwargs=job_kwargs,
-                waveform_params=dict(recipe_row["params"]),
+                waveform_params=dict(recipe_row["waveform_params"]),
                 statistics_spans=Sorting().get_statistics_spans(
                     {"sorting_id": row["sorting_id"]}
                 ),

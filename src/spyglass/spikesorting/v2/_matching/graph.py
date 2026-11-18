@@ -584,8 +584,8 @@ def derive_tracked_units(
         raise TrackedUnitBudgetExceededError(
             f"TrackedUnit.make: the curated-unit graph has {len(nodes)} nodes, "
             f"exceeding max_strict_nodes={max_strict_nodes}. Shrink the session "
-            "group or raise MatcherParameters.params['max_strict_nodes'] "
-            "intentionally."
+            "group or raise "
+            "MatcherParameters.matcher_params['max_strict_nodes'] intentionally."
         )
 
     def _node_input(node):

@@ -17,6 +17,7 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     _jsonable_blob,
     json_values_equal,
     parameter_row_fingerprint,
+    params_column,
 )
 from spyglass.spikesorting.v2._core.observed_time import observed_intervals
 from spyglass.spikesorting.v2._core.parameter_identity import (
@@ -235,9 +236,10 @@ def _preset_parameter_records(
         shipped = {(r[0], r[1]) for r in table._DEFAULT_CONTENTS}
     else:
         shipped = {r[0] for r in table._DEFAULT_CONTENTS}
+    column = params_column(name_attr)
     records: list[dict] = []
     for row in table.fetch(as_dict=True):
-        params = _jsonable_blob(row["params"])
+        params = _jsonable_blob(row[column])
         key = (
             (row["sorter"], row[name_attr]) if sorter_keyed else row[name_attr]
         )
@@ -357,11 +359,17 @@ def _simple_parameter_records(
     duplicates.
     """
     table_name = table.__name__
+    # The fingerprint keys a content blob as "params" for every table.
+    blob_column = (
+        params_column(name_attr) if name_attr.endswith("_params_name") else None
+    )
     records: list[dict] = []
     for simple_row in table.fetch(as_dict=True):
         version = int(simple_row.get("params_schema_version", 0) or 0)
         content = {
-            column: _jsonable_blob(value)
+            ("params" if column == blob_column else column): _jsonable_blob(
+                value
+            )
             for column, value in simple_row.items()
             if column != name_attr
         }
@@ -417,7 +425,7 @@ def _autocuration_rule_content(rules_row) -> list[dict]:
 
 def _motion_estimation_summary(row) -> str:
     """One-line summary of a ``MotionEstimationParameters`` row."""
-    params = _jsonable_blob(row["params"])
+    params = _jsonable_blob(row["motion_estimation_params"])
     return (
         f"preset {params.get('preset')!r}, max_gap_s "
         f"{_num(params.get('max_gap_s'))}"
@@ -426,7 +434,7 @@ def _motion_estimation_summary(row) -> str:
 
 def _motion_interpolation_summary(row) -> str:
     """One-line summary of a ``MotionInterpolationParameters`` row."""
-    params = _jsonable_blob(row["params"])
+    params = _jsonable_blob(row["motion_interpolation_params"])
     return (
         f"{params.get('spatial_interpolation_method')}, border_mode "
         f"{params.get('border_mode')!r}"

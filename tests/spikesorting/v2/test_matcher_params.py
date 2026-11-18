@@ -115,7 +115,7 @@ def test_bundle_seed_override_rejected_at_insert(isolated_matcher_rows):
             {
                 "matcher_params_name": "um_bad_seed",
                 "matcher": "unitmatch",
-                "params": params,
+                "matcher_params": params,
                 "params_schema_version": 1,
                 "job_kwargs": {"random_seed": 7, "n_jobs": 2},
             }
@@ -125,7 +125,7 @@ def test_bundle_seed_override_rejected_at_insert(isolated_matcher_rows):
         {
             "matcher_params_name": "um_ok_jobkwargs",
             "matcher": "unitmatch",
-            "params": params,
+            "matcher_params": params,
             "params_schema_version": 1,
             "job_kwargs": {"n_jobs": 2},
         },
@@ -147,17 +147,17 @@ def test_named_bundle_params_stored_distinctly(isolated_matcher_rows):
         {
             "matcher_params_name": "unitmatch_wide",
             "matcher": "unitmatch",
-            "params": wide,
+            "matcher_params": wide,
             "params_schema_version": 1,
             "job_kwargs": None,
         }
     )
     default_params = (
         MatcherParameters & {"matcher_params_name": "unitmatch_default"}
-    ).fetch1("params")
+    ).fetch1("matcher_params")
     wide_params = (
         MatcherParameters & {"matcher_params_name": "unitmatch_wide"}
-    ).fetch1("params")
+    ).fetch1("matcher_params")
     assert default_params["ms_before"] == 1.5
     assert wide_params["ms_before"] == 2.0
 

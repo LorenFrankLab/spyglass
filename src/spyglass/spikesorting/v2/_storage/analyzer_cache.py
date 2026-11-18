@@ -350,7 +350,7 @@ def waveform_recipe_hash(recipe_row) -> str:
 
     return parameter_fingerprint(
         "AnalyzerWaveformParameters",
-        params=_jsonable_blob(recipe_row["params"]),
+        params=_jsonable_blob(recipe_row["waveform_params"]),
         params_schema_version=int(recipe_row["params_schema_version"]),
     )
 

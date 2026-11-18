@@ -176,8 +176,15 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
     estimates and concat members that reference it.
     Concat members reference `RecordingArtifactDetection` directly.
 - Parameter tables are Pydantic-validated Lookups; user params validate the
-    `params` blob on insert. `PreprocessingWaveformParameters`, a manual table,
-    maps a custom preprocessing row to its display and metric waveform rows.
+    content blob on insert. Following the Spyglass convention
+    ([TableTypes](TableTypes.md)), the blob is `{stage}_params`, named after
+    the `{stage}_params_name` key (`sorter_params`, `waveform_params`, ...);
+    generic helpers derive it with `_core.lookup_validation.params_column`,
+    and a row with a `params` key is refused. Fingerprint payloads key the
+    blob as `params` for every table, so no fingerprint or id depends on the
+    column name.
+    `PreprocessingWaveformParameters`, a manual table, maps a custom
+    preprocessing row to its display and metric waveform rows.
 - A row whose name is already stored with different content raises
     `DuplicateParameterContentError`, also under `skip_duplicates=True`.
     `allow_duplicate_params=True` only allows the same content under a second

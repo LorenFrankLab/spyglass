@@ -1181,7 +1181,7 @@ def test_insert_inputs_geometry_is_backend_owned(
             {
                 "matcher_params_name": matcher_params_name,
                 "matcher": matcher,
-                "params": {},
+                "matcher_params": {},
             }
         )
     cur = fx["curations"]
@@ -2154,12 +2154,12 @@ def span_edge_sorts(daily_concat_match_inputs):
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_30khz_ms5_2026_06",
         }
-    ).fetch1("params")
+    ).fetch1("sorter_params")
     SorterParameters.insert1(
         {
             "sorter": "mountainsort5",
             "sorter_params_name": params_name,
-            "params": dict(default_ms5),
+            "sorter_params": dict(default_ms5),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,
@@ -2660,12 +2660,12 @@ def member_time_sorts(daily_concat_match_inputs):
             "sorter": "mountainsort5",
             "sorter_params_name": "franklab_30khz_ms5_2026_06",
         }
-    ).fetch1("params")
+    ).fetch1("sorter_params")
     SorterParameters.insert1(
         {
             "sorter": "mountainsort5",
             "sorter_params_name": params_name,
-            "params": dict(default_ms5),
+            "sorter_params": dict(default_ms5),
         },
         skip_duplicates=True,
         allow_duplicate_params=True,

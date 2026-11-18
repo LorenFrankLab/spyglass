@@ -355,7 +355,7 @@ def handling_session(dj_conn, smoke_nwb):
     PreprocessingParameters().insert1(
         {
             "preprocessing_params_name": _INTERP_PARAMS,
-            "params": PreprocessingParamsSchema.model_validate(
+            "preprocessing_params": PreprocessingParamsSchema.model_validate(
                 {"bad_channel_handling": "interpolate"}
             ).model_dump(),
         },
@@ -802,7 +802,7 @@ def test_remove_field_does_not_change_default_recording(
         PreprocessingParameters().insert1(
             {
                 "preprocessing_params_name": "_pytest_legacy_no_bad_channel_handling",
-                "params": legacy_blob,
+                "preprocessing_params": legacy_blob,
                 "params_schema_version": 4,
             },
             skip_duplicates=True,

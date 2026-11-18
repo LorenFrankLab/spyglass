@@ -672,7 +672,7 @@ def test_preflight_all_pass(preflight_inputs):
         for r in rows
         if resolve_sort_config(
             r["sorter"],
-            r["params"],
+            r["sorter_params"],
             job_kwargs=_resolved_job_kwargs(r["job_kwargs"]),
             execution_params=r.get("execution_params"),
         ).as_dict()
@@ -764,7 +764,7 @@ def test_preflight_fails_an_unmapped_preprocessing_row(
     PreprocessingParameters.insert1(
         {
             "preprocessing_params_name": row,
-            "params": {
+            "preprocessing_params": {
                 "bandpass_filter": {"freq_min": 450.0, "freq_max": 6000.0}
             },
         },
@@ -950,7 +950,7 @@ def test_kilosort4_on_a_referenced_group_warns_of_double_reference(
         ],
         skip_duplicates=True,
     )
-    ks4 = {"sorter": "kilosort4", "params": {"nblocks": 5}}
+    ks4 = {"sorter": "kilosort4", "sorter_params": {"nblocks": 5}}
     try:
         message = kilosort4_double_reference_warning(
             ks4, nwb_file_name, referenced
@@ -963,14 +963,14 @@ def test_kilosort4_on_a_referenced_group_warns_of_double_reference(
             kilosort4_double_reference_warning(ks4, nwb_file_name, plain)
             is None
         )
-        no_car = {"sorter": "kilosort4", "params": {"do_CAR": False}}
+        no_car = {"sorter": "kilosort4", "sorter_params": {"do_CAR": False}}
         assert (
             kilosort4_double_reference_warning(
                 no_car, nwb_file_name, referenced
             )
             is None
         )
-        ms5 = {"sorter": "mountainsort5", "params": {}}
+        ms5 = {"sorter": "mountainsort5", "sorter_params": {}}
         assert (
             kilosort4_double_reference_warning(ms5, nwb_file_name, referenced)
             is None
@@ -1728,7 +1728,7 @@ def test_preflight_matlab_local_backend_errors(
         {
             "sorter": "kilosort2_5",
             "sorter_params_name": "preflight_local",
-            "params": {},
+            "sorter_params": {},
             "job_kwargs": None,
         },
         skip_duplicates=True,
@@ -1897,13 +1897,13 @@ def test_scientific_setup_uses_execution_rows(preflight_inputs):
     assert setup["preprocessing"] == (
         PreprocessingParameters
         & {"preprocessing_params_name": bundle.preprocessing_params_name}
-    ).fetch1("params")
+    ).fetch1("preprocessing_params")
     assert setup["artifact_detection"] == (
         ArtifactDetectionParameters
         & {
             "artifact_detection_params_name": bundle.artifact_detection_params_name
         }
-    ).fetch1("params")
+    ).fetch1("artifact_detection_params")
     assert len(setup["references"]) == 1
     no_mask = bundle.model_copy(
         update={"sorter": "kilosort4", "artifact_detection_params_name": None}

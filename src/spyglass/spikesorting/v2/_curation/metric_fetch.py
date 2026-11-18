@@ -144,7 +144,7 @@ def fetch_evaluation_inputs(key) -> CurationEvaluationFetched:
     metric_names = list(qm["metric_names"])
     assert_merge_preset_metrics(acr["auto_merge_preset"], metric_names)
     sorter_row, analyzer_job_kwargs = fetch_sorter_analyzer_inputs(sorting_key)
-    peak_sign = resolve_peak_sign(sorter_row["params"])
+    peak_sign = resolve_peak_sign(sorter_row["sorter_params"])
     noise_seed = analyzer_job_kwargs.get("random_seed", 0)
     metric_kwargs = apply_metric_seed(
         metric_names,

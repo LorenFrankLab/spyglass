@@ -237,9 +237,9 @@ class MatcherProtocol(Protocol):
             (chronological) order. Each bundle's ``curation_key`` is the
             identity the matcher echoes back on the pairs it returns.
         params : dict
-            The matcher's ``MatcherParameters.params`` blob, validated at
-            insert time against the params schema registered with this
-            backend (see :func:`register_matcher`).
+            The matcher's ``MatcherParameters.matcher_params`` blob,
+            validated at insert time against the params schema registered with
+            this backend (see :func:`register_matcher`).
 
         Returns
         -------
@@ -289,7 +289,7 @@ def register_matcher(
         selection does not read or compare its inputs' channel positions.
     schema : type
         The Pydantic model validating that matcher's ``MatcherParameters``
-        ``params`` blob.
+        ``matcher_params`` blob.
     input_preparer : MatcherInputPreparer, optional
         Prepare the backend's input layout. Defaults to the shared dense
         split-half waveform layout, extracted without UnitMatchPy. Supply a

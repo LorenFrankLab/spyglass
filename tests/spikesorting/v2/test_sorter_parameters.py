@@ -87,7 +87,7 @@ def test_sorter_parameters_backfills_missing_schema_version(request):
 
     base = {
         "sorter": "clusterless_thresholder",
-        "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+        "sorter_params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
         "job_kwargs": None,
     }
 
@@ -159,7 +159,7 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
     typo = {
         "sorter": "mountainSort4",  # capital S -> not a real SI sorter
         "sorter_params_name": "audit_a5_typo",
-        "params": {},
+        "sorter_params": {},
         "job_kwargs": None,
     }
     with pytest.raises(ValueError, match="mountainSort4"):
@@ -169,7 +169,7 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
     ok = {
         "sorter": "tridesclous2",
         "sorter_params_name": "audit_a5_real",
-        "params": {},
+        "sorter_params": {},
         "job_kwargs": None,
     }
     # The bare-default content matches the shipped ``tridesclous2`` "default"
@@ -195,7 +195,7 @@ def test_sorter_parameters_rejects_unknown_sorter_name(request):
     escape_hatch = {
         "sorter": "simple",
         "sorter_params_name": "audit_a5_escape_hatch",
-        "params": {},
+        "sorter_params": {},
         "job_kwargs": None,
     }
     request.addfinalizer(
@@ -233,7 +233,10 @@ def test_sorter_parameters_update1_rejected_in_place(request):
     SorterParameters().insert1(
         {
             **key,
-            "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+            "sorter_params": {
+                "detect_threshold": 100.0,
+                "threshold_unit": "uv",
+            },
             "job_kwargs": None,
         },
         allow_duplicate_params=True,
@@ -244,19 +247,27 @@ def test_sorter_parameters_update1_rejected_in_place(request):
         SorterParameters().update1(
             {
                 **key,
-                "params": {"detect_threshold": 50.0, "threshold_unit": "uv"},
+                "sorter_params": {
+                    "detect_threshold": 50.0,
+                    "threshold_unit": "uv",
+                },
             }
         )
-    assert (SorterParameters & key).fetch1("params")[
+    assert (SorterParameters & key).fetch1("sorter_params")[
         "detect_threshold"
     ] == 100.0
 
     # Explicit escape hatch: the deliberate mutation goes through.
     SorterParameters().update1(
-        {**key, "params": {"detect_threshold": 50.0, "threshold_unit": "uv"}},
+        {
+            **key,
+            "sorter_params": {"detect_threshold": 50.0, "threshold_unit": "uv"},
+        },
         allow_param_mutation=True,
     )
-    assert (SorterParameters & key).fetch1("params")["detect_threshold"] == 50.0
+    assert (SorterParameters & key).fetch1("sorter_params")[
+        "detect_threshold"
+    ] == 50.0
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -295,7 +306,7 @@ def test_sorter_parameters_tracks_execution_params(request):
         {
             "sorter": "mountainsort4",
             "sorter_params_name": "exec_test_local",
-            "params": dict(params),
+            "sorter_params": dict(params),
             "job_kwargs": None,
         },
         skip_duplicates=True,
@@ -305,7 +316,7 @@ def test_sorter_parameters_tracks_execution_params(request):
         {
             "sorter": "mountainsort4",
             "sorter_params_name": "exec_test_singularity",
-            "params": dict(params),
+            "sorter_params": dict(params),
             "job_kwargs": None,
             "execution_params": {
                 "backend": "singularity",
@@ -340,7 +351,7 @@ def test_sorter_parameters_tracks_execution_params(request):
             {
                 "sorter": "mountainsort4",
                 "sorter_params_name": "exec_test_local_dup",
-                "params": dict(params),
+                "sorter_params": dict(params),
                 "job_kwargs": None,
             },
             skip_duplicates=True,
@@ -370,7 +381,7 @@ def test_execution_params_schema_version_drift_rejected(request):
             {
                 "sorter": "mountainsort4",
                 "sorter_params_name": "exec_version_drift",
-                "params": {"adjacency_radius": 71.0},
+                "sorter_params": {"adjacency_radius": 71.0},
                 "job_kwargs": None,
                 "execution_params": {
                     "backend": "docker",
@@ -412,7 +423,10 @@ def test_container_kwargs_not_allowed_in_sorter_params(request):
             {
                 "sorter": "mountainsort4",
                 "sorter_params_name": "reserved_strict",
-                "params": {"adjacency_radius": 100.0, "docker_image": "x"},
+                "sorter_params": {
+                    "adjacency_radius": 100.0,
+                    "docker_image": "x",
+                },
                 "job_kwargs": None,
             },
             skip_duplicates=True,
@@ -424,7 +438,7 @@ def test_container_kwargs_not_allowed_in_sorter_params(request):
             {
                 "sorter": "kilosort4",
                 "sorter_params_name": "reserved_permissive",
-                "params": {"singularity_image": "x"},
+                "sorter_params": {"singularity_image": "x"},
                 "job_kwargs": None,
             },
             skip_duplicates=True,
@@ -436,7 +450,7 @@ def test_container_kwargs_not_allowed_in_sorter_params(request):
             {
                 "sorter": "spykingcircus2",
                 "sorter_params_name": "reserved_jobkwargs",
-                "params": {},
+                "sorter_params": {},
                 "job_kwargs": {"installation_mode": "pypi"},
             },
             skip_duplicates=True,
@@ -504,7 +518,7 @@ def test_clusterless_rejects_container_backend():
     row = {
         "sorter": "clusterless_thresholder",
         "sorter_params_name": "clusterless_container_reject",
-        "params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
+        "sorter_params": {"detect_threshold": 100.0, "threshold_unit": "uv"},
         "job_kwargs": None,
         "execution_params": {
             "backend": "docker",

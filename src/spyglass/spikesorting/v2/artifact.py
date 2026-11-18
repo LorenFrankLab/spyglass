@@ -102,7 +102,8 @@ class ArtifactDetectionParameters(
 ):
     """Validated artifact-detection parameter blob.
 
-    ``params`` is validated by :class:`ArtifactDetectionParamsSchema`.
+    ``artifact_detection_params`` is validated by
+    :class:`ArtifactDetectionParamsSchema`.
     ``insert_default`` ships:
 
     - ``"none"``: no scan
@@ -123,7 +124,7 @@ class ArtifactDetectionParameters(
     definition = """
     artifact_detection_params_name: varchar(64)
     ---
-    params: blob
+    artifact_detection_params: blob
     params_schema_version=2: int
     job_kwargs=null: blob  # SI job-kwargs for chunked scan; see docstring
     """
@@ -916,7 +917,7 @@ class RecordingArtifactDetection(
             * (RecordingArtifactSelection & key)
             * RecordingSelection
         ).fetch1(
-            "params",
+            "artifact_detection_params",
             "job_kwargs",
             "recording_id",
             "nwb_file_name",
@@ -1032,7 +1033,7 @@ class SharedArtifactDetection(
         ).fetch1(
             "shared_artifact_group_name",
             "manual_excluded_times",
-            "params",
+            "artifact_detection_params",
             "job_kwargs",
         )
         validated = ArtifactDetectionParamsSchema.model_validate(params_blob)

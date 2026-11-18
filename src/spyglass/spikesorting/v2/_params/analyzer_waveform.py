@@ -13,7 +13,8 @@ Sparsity methods:
 
 Not fields:
 
-- ``peak_sign``: derived from the tracked ``SorterParameters.params`` blob.
+- ``peak_sign``: derived from the tracked ``SorterParameters.sorter_params``
+  blob.
 - ``return_in_uV``: derived from ``whiten``. A microvolt readback would
   un-normalize the whitened space.
 - Concurrency (``n_jobs``, ``chunk_duration``, ``progress_bar``): resolved by

@@ -62,7 +62,7 @@ def test_default_estimation_rows_install_idempotently(motion_params):
                     {"motion_estimation_params_name": "dredge_v1"},
                     {"motion_estimation_params_name": "dredge_fast_v1"},
                 ]
-            ).fetch("motion_estimation_params_name", "params")
+            ).fetch("motion_estimation_params_name", "motion_estimation_params")
         )
     }
     assert presets == {"dredge_v1": "dredge", "dredge_fast_v1": "dredge_fast"}
@@ -73,7 +73,7 @@ def test_estimation_row_with_unknown_override_is_rejected(motion_params):
         motion_params.insert1(
             {
                 "motion_estimation_params_name": "typo_row",
-                "params": {
+                "motion_estimation_params": {
                     "preset": "dredge",
                     "detect_kwargs": {"detect_treshold": 6.0},
                     "max_gap_s": 30.0,
@@ -88,7 +88,10 @@ def test_estimation_row_rejects_job_kwargs_seed(motion_params):
         motion_params.insert1(
             {
                 "motion_estimation_params_name": "seeded_job_kwargs",
-                "params": {"preset": "rigid_fast", "max_gap_s": 30.0},
+                "motion_estimation_params": {
+                    "preset": "rigid_fast",
+                    "max_gap_s": 30.0,
+                },
                 "job_kwargs": {"random_seed": 3},
             }
         )
@@ -106,7 +109,7 @@ def test_estimation_row_duplicating_a_default_is_rejected(motion_params):
         motion_params.insert1(
             {
                 "motion_estimation_params_name": "dredge_copy",
-                "params": MotionEstimationParamsSchema(
+                "motion_estimation_params": MotionEstimationParamsSchema(
                     preset="dredge", max_gap_s=30.0
                 ).model_dump(),
             }
@@ -152,7 +155,7 @@ def test_selection_is_content_addressed_and_idempotent(drift_recording):
     params = (
         MotionEstimationParameters
         & {"motion_estimation_params_name": "dredge_fast_v1"}
-    ).fetch1("params")
+    ).fetch1("motion_estimation_params")
     expected = deterministic_id(
         "motion_estimate",
         motion_estimate_identity_payload(
@@ -321,7 +324,7 @@ def test_estimate_round_trip(drift_recording):
     params = (
         MotionEstimationParameters
         & {"motion_estimation_params_name": "dredge_fast_v1"}
-    ).fetch1("params")
+    ).fetch1("motion_estimation_params")
     resolved = _motion.resolve_estimation_params(params)
     assert _motion.resolved_params_hash(row["resolved_params"]) == (
         _motion.resolved_params_hash(resolved)
@@ -513,7 +516,7 @@ def test_unfiltered_source_planted_directly_is_refused_at_compute(
     estimation_params = (
         MotionEstimationParameters
         & {"motion_estimation_params_name": params_name}
-    ).fetch1("params")
+    ).fetch1("motion_estimation_params")
     content_hash = (Recording & recording_key).fetch1("content_hash")
     motion_estimate_id, master_row = _motion.motion_estimate_selection_identity(
         source_kind="recording",
@@ -969,7 +972,7 @@ def test_correction_recipes_install_and_are_validated(dj_conn):
         MotionInterpolationParameters.insert1(
             {
                 "motion_interpolation_params_name": "zeros_test",
-                "params": {
+                "motion_interpolation_params": {
                     "border_mode": "force_zeros",
                     "spatial_interpolation_method": "kriging",
                     "sigma_um": 20.0,
@@ -1076,7 +1079,7 @@ def test_interpolation_only_change_reuses_the_estimate(
     interpolation_params = (
         MotionInterpolationParameters
         & {"motion_interpolation_params_name": "kriging_force_extrapolate_v1"}
-    ).fetch1("params")
+    ).fetch1("motion_interpolation_params")
     assert _motion.motion_corrected_selection_identity(
         motion_estimate_id=estimate["motion_estimate_id"],
         motion_interpolation_params_name="kriging_force_extrapolate_v1",
@@ -1140,7 +1143,7 @@ def test_stale_corrected_selection_is_refused_at_compute(
     MotionInterpolationParameters.insert1(
         {
             "motion_interpolation_params_name": "stale_test_idw",
-            "params": {
+            "motion_interpolation_params": {
                 "border_mode": "force_extrapolate",
                 "spatial_interpolation_method": "idw",
                 "sigma_um": 20.0,
@@ -1294,7 +1297,7 @@ def test_estimate_and_corrected_recording_round_trip(
             & {
                 "motion_interpolation_params_name": "kriging_force_extrapolate_v1"
             }
-        ).fetch1("params")
+        ).fetch1("motion_interpolation_params")
     )
     assert provenance["motion_estimate_id"] == str(
         estimate["motion_estimate_id"]
@@ -1467,7 +1470,7 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
     MotionEstimationParameters.insert1(
         {
             "motion_estimation_params_name": "dredge_fast_gap_cap_test",
-            "params": MotionEstimationParamsSchema(
+            "motion_estimation_params": MotionEstimationParamsSchema(
                 preset="dredge_fast", max_gap_s=0.25
             ).model_dump(),
         },
@@ -1497,7 +1500,7 @@ def test_persisted_corrected_traces_match_the_interpolation_oracle(
             & {
                 "motion_interpolation_params_name": "kriging_force_extrapolate_v1"
             }
-        ).fetch1("params")
+        ).fetch1("motion_interpolation_params")
     )
 
     def _interpolated(times):
@@ -2154,7 +2157,7 @@ def test_sorter_correcting_motion_itself_is_rejected_for_a_corrected_source(
     SorterParameters.insert_default()
     sc2 = {"sorter": "spykingcircus2", "sorter_params_name": "default"}
     assert "apply_motion_correction" not in (SorterParameters & sc2).fetch1(
-        "params"
+        "sorter_params"
     )
     source_key = discontinuous_sources["member_b"]
     corrected = populated_corrected(
@@ -2412,7 +2415,7 @@ def test_pipeline_motion_modes_on_one_recording(drift_recording):
             estimation_params=(
                 MotionEstimationParameters
                 & {"motion_estimation_params_name": MOTION_RECIPE}
-            ).fetch1("params"),
+            ).fetch1("motion_estimation_params"),
         ).selection_id
         assert estimate["motion_estimate_id"] == expected_estimate
         estimate_key = {"motion_estimate_id": expected_estimate}
@@ -3485,7 +3488,7 @@ def test_invalid_support_and_geometry_fail_before_sorting(
     MotionEstimationParameters.insert1(
         {
             "motion_estimation_params_name": "no_evidence_test",
-            "params": MotionEstimationParamsSchema(
+            "motion_estimation_params": MotionEstimationParamsSchema(
                 preset="dredge_fast",
                 max_gap_s=30.0,
                 detect_kwargs={"detect_threshold": 1.0e6},

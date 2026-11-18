@@ -91,7 +91,7 @@ def _build_cache(inputs, folder, sorter_params):
         inputs["sorting"],
         inputs["recording"],
         {"sorting_id": inputs["sorting_id"]},
-        sorter_row={"params": sorter_params},
+        sorter_row={"sorter_params": sorter_params},
         job_kwargs=inputs["job_kwargs"],
         analyzer_folder=folder,
         waveform_params=inputs["waveform_params"],
@@ -151,7 +151,7 @@ def test_incompatible_sparse_cache_is_rejected_then_rebuilt(
         built_peak_sign=built_peak_sign,
         receipt=receipt,
     )
-    inputs["sorter_row"] = {"params": sorter_params}
+    inputs["sorter_row"] = {"sorter_params": sorter_params}
     folder = inputs["analyzer_folder"]
     with pytest.raises(AnalyzerFolderInvalidError):
         analyzer_service.load_or_rebuild_analyzer_from_resolved(
@@ -193,7 +193,7 @@ def test_dense_cache_without_receipt_is_reused(tmp_path, monkeypatch):
     assert not (
         inputs["analyzer_folder"] / analyzer_cache.ANALYZER_SPARSITY_RECEIPT
     ).exists()
-    inputs["sorter_row"] = {"params": {"detect_sign": 1}}
+    inputs["sorter_row"] = {"sorter_params": {"detect_sign": 1}}
 
     def must_not_build(*args, **kwargs):
         raise AssertionError("a compatible cache must be reused")
@@ -223,7 +223,7 @@ def test_cache_built_from_other_recipe_content_is_rebuilt(
     inputs = _cached_analyzer(
         tmp_path, sign=1, sparsity={"method": "dense"}, built_peak_sign=None
     )
-    inputs["sorter_row"] = {"params": {"detect_sign": 1}}
+    inputs["sorter_row"] = {"sorter_params": {"detect_sign": 1}}
     analyzer_service.load_or_rebuild_analyzer_from_resolved(
         **inputs, rebuild=False
     )
@@ -249,7 +249,7 @@ def test_public_sort_analyzer_rebuilds_incompatible_cache(
     inputs = _cached_analyzer(
         tmp_path, sign=1, sparsity={}, built_peak_sign="neg"
     )
-    sorter_row = {"params": {"detect_sign": 1}}
+    sorter_row = {"sorter_params": {"detect_sign": 1}}
     builds = []
 
     class SortingRelation:
@@ -263,7 +263,9 @@ def test_public_sort_analyzer_rebuilds_incompatible_cache(
 
     def rebuild(table, key, waveform_params_name):
         builds.append(key)
-        _build_cache(inputs, inputs["analyzer_folder"], sorter_row["params"])
+        _build_cache(
+            inputs, inputs["analyzer_folder"], sorter_row["sorter_params"]
+        )
 
     monkeypatch.setattr(
         analyzer_cache, "analyzer_path", lambda *args: inputs["analyzer_folder"]

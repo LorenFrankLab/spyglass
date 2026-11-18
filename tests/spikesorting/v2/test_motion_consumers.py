@@ -1270,7 +1270,7 @@ def _gap_capped_corrected(source) -> tuple[dict, dict]:
     MotionEstimationParameters.insert1(
         {
             "motion_estimation_params_name": GAP_CAPPED_RECIPE,
-            "params": MotionEstimationParamsSchema(
+            "motion_estimation_params": MotionEstimationParamsSchema(
                 preset="dredge_fast", max_gap_s=0.0
             ).model_dump(),
         },

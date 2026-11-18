@@ -47,7 +47,7 @@ class ResolvedRecordingInputs(NamedTuple):
     reference_electrode_id : int or None
         ``SortGroupV2.reference_electrode_id``.
     preprocessing_params : PreprocessingParamsSchema
-        The validated ``PreprocessingParameters.params`` blob.
+        The validated ``PreprocessingParameters.preprocessing_params`` blob.
     bad_channel_ids : tuple
         Interior curated-bad electrode ids the ``interpolate`` path fills;
         empty for ``remove``.
@@ -84,7 +84,7 @@ class SortGroupChannels(NamedTuple):
     reference_electrode_id : int or None
         ``SortGroupV2.reference_electrode_id``.
     preprocessing_params : PreprocessingParamsSchema
-        The validated ``PreprocessingParameters.params`` blob.
+        The validated ``PreprocessingParameters.preprocessing_params`` blob.
     bad_channel_ids : tuple
         Interior curated-bad electrode ids the ``interpolate`` path fills;
         empty for ``remove``.
@@ -136,7 +136,7 @@ def resolve_sort_group_channels(
         (
             PreprocessingParameters
             & {"preprocessing_params_name": preprocessing_params_name}
-        ).fetch1("params")
+        ).fetch1("preprocessing_params")
     )
     bad_channel_ids: tuple = ()
     if preprocessing_params.bad_channel_handling == "interpolate":

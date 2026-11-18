@@ -431,7 +431,7 @@ def test_cross_session_notebook_runs(dj_conn, smoke_nwb):
                 {
                     "matcher_params_name": matcher_params_name,
                     "matcher": "notebook_fixture_matcher",
-                    "params": {"probability": 0.99},
+                    "matcher_params": {"probability": 0.99},
                 },
                 skip_duplicates=True,
             )

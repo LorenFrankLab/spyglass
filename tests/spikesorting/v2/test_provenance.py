@@ -185,7 +185,7 @@ def _setup_clusterless_smoke_sort(session_name):
         {
             "sorter": "clusterless_thresholder",
             "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "params": dict(SMOKE_CLUSTERLESS_PARAMS),
+            "sorter_params": dict(SMOKE_CLUSTERLESS_PARAMS),
             "params_schema_version": 4,
             "job_kwargs": None,
         },
