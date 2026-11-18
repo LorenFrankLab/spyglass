@@ -27,6 +27,7 @@ _TABLE_MODULES = {
     "ArtifactDetectionOutput": "artifact_output",
     "ConcatMemberCurationV2": "concat_member_curation",
     "CurationV2": "curation",
+    "CurationIdCounter": "curation",
     "FigPackCurationSelection": "figpack_curation",
     "FigPackCuration": "figpack_curation",
     "QualityMetricParameters": "metric_curation",
