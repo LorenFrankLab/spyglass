@@ -23,6 +23,7 @@ from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
+    get_group_by_electrode_table_column,
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -91,6 +92,77 @@ class SortGroup(SpyglassMixin, dj.Manual):
             omit_ref_electrode_group=omit_ref_electrode_group,
             omit_unitrode=omit_unitrode,
         )
+        cls.insert(sg_keys, skip_duplicates=True)
+        cls.SortGroupElectrode().insert(sge_keys, skip_duplicates=True)
+
+    @classmethod
+    def set_group_by_electrode_table_column(
+        cls,
+        nwb_file_name: str,
+        column: str,
+        groups: list[list],
+        sort_group_ids: list[int] = None,
+        remove_bad_channels: bool = True,
+        omit_unitrode: bool = True,
+        delete_existing_entries: bool = False,
+    ):
+        """Divides electrodes into groups based on a chosen column in an nwbfile's electrodes table.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Name of the NWB file.
+        column : str
+            Column in the electrode table to group by (e.g., "intan_channel_number" for Berke Lab).
+        groups : list[list]
+            Each sublist specifies values in 'column' to include in one sort group.
+        sort_group_ids : list[int]
+            Optional. Custom sort group ids for each entry in 'groups'. Must be the same length as groups.
+            If none specified, sort group ids are automatically assigned starting from 0.
+        remove_bad_channels : bool
+            Optional. If True, electrodes with bad_channel != 0 are removed. Default True
+        omit_unitrode : bool
+            Optional. If True, groups with only one electrode are skipped. Default True
+        delete_existing_entries : bool
+            Optional. If True, existing SortGroup entries for this nwbfile are deleted. Default False
+        """
+        # Handle existing SortGroup entries
+        existing_entries = SortGroup & {"nwb_file_name": nwb_file_name}
+
+        if existing_entries:
+            existing_sort_group_ids = existing_entries.fetch("sort_group_id")
+
+            if delete_existing_entries:
+                logger.info(
+                    f"Deleting existing SortGroups {existing_sort_group_ids} for {nwb_file_name}"
+                )
+                (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
+            else:
+                logger.warning(
+                    f"Existing SortGroups {existing_sort_group_ids} for {nwb_file_name} will not be deleted."
+                )
+                # The user must either specify custom sort_group_ids or delete the existing entries
+                if sort_group_ids is None:
+                    raise ValueError(
+                        "Must specify `sort_group_ids` if you do not want to delete existing SortGroups."
+                    )
+                # If we have custom sort_group_ids, make sure they don't conflict with existing entries
+                overlap = set(existing_sort_group_ids) & set(sort_group_ids)
+                if overlap:
+                    raise ValueError(
+                        f"Sort group IDs {sorted(overlap)} already exist for {nwb_file_name}. "
+                        f"Use `delete_existing_entries=True` or choose new sort_group_ids."
+                    )
+
+        sg_keys, sge_keys = get_group_by_electrode_table_column(
+            nwb_file_name=nwb_file_name,
+            column=column,
+            groups=groups,
+            sort_group_ids=sort_group_ids,
+            remove_bad_channels=remove_bad_channels,
+            omit_unitrode=omit_unitrode,
+        )
+
         cls.insert(sg_keys, skip_duplicates=True)
         cls.SortGroupElectrode().insert(sge_keys, skip_duplicates=True)
 
