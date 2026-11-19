@@ -379,6 +379,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
     - Move `Interval` to `spyglass.utils.interval`, importable without a
         database; `common_interval` re-exports it #1729
+    - Fix `Interval.subtract` applying an interval that spans several base
+        intervals to the first one only #XXXX
 
 - Decoding
 

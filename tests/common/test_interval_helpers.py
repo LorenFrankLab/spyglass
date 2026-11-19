@@ -263,6 +263,88 @@ def test_subtract(interval_obj, one, two, min_length, expected_result):
 
 
 @pytest.mark.parametrize(
+    "one, two, reverse, expected_result",
+    [
+        (  # One removal covering both base intervals, #1692
+            [(3, 8), (14, 35)],
+            [(0, 53)],
+            False,
+            [],
+        ),
+        (  # One removal bridging the gap between base intervals, #1692
+            [(0, 5), (8, 10)],
+            [(4, 9)],
+            False,
+            [(0, 4), (9, 10)],
+        ),
+        (  # One removal spanning three base intervals
+            [(0, 2), (4, 6), (8, 10)],
+            [(1, 9)],
+            False,
+            [(0, 1), (9, 10)],
+        ),
+        (  # Touching edges: (3, 8) stops where the second base starts
+            [(0, 5), (8, 12)],
+            [(3, 8), (10, 12)],
+            False,
+            [(0, 3), (8, 10)],
+        ),
+        (  # reverse=True: self is removed from other
+            [(4, 9)],
+            [(0, 5), (8, 10)],
+            True,
+            [(0, 4), (9, 10)],
+        ),
+    ],
+)
+def test_subtract_spanning(interval_obj, one, two, reverse, expected_result):
+    ret = interval_obj(one).subtract(two, reverse=reverse)
+    assert np.array_equal(
+        ret.times.reshape(-1, 2), np.reshape(expected_result, (-1, 2))
+    ), "Problem with Interval.subtract across base intervals"
+
+
+def _subtract_reference(base, other):
+    """Remove every interval in `other` from each base interval separately."""
+    result = []
+    for start, stop in base:
+        pieces = [(start, stop)] if start < stop else []
+        for other_start, other_stop in other:
+            kept = []
+            for piece_start, piece_stop in pieces:
+                if other_stop <= piece_start or other_start >= piece_stop:
+                    kept.append((piece_start, piece_stop))
+                    continue
+                if piece_start < other_start:
+                    kept.append((piece_start, other_start))
+                if other_stop < piece_stop:
+                    kept.append((other_stop, piece_stop))
+            pieces = kept
+        result += pieces
+    return np.unique(np.reshape(result, (-1, 2)), axis=0)
+
+
+def test_subtract_matches_reference(interval_obj):
+    """Random sorted lists on a small integer grid, so edges often coincide."""
+    rng = np.random.default_rng(1692)
+    for _ in range(2000):
+        base, other = (
+            np.unique(
+                np.sort(rng.integers(0, 30, size=(rng.integers(0, 6), 2))),
+                axis=0,
+            )
+            for _ in range(2)
+        )
+        expected = _subtract_reference(base, other)
+        forward = interval_obj(base).subtract(other)
+        reverse = interval_obj(other).subtract(base, reverse=True)
+        for ret in (forward, reverse):
+            assert np.array_equal(
+                ret.times.reshape(-1, 2), expected
+            ), f"Interval.subtract mismatch for {base.tolist()} - {other.tolist()}"
+
+
+@pytest.mark.parametrize(
     "expected_result, min_len, max_len",
     [
         (np.array([[0, 1]]), 0.0, 10),
