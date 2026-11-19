@@ -412,9 +412,10 @@ class DockerMySQLManager:
                 logline = f"Container {self.container_name} (exited)"
 
             if remove:
-                # Remove the image's anonymous /var/lib/mysql volume (~4 GB).
+                # The MySQL image declares a volume; v=True removes it with the
+                # container. A vol_dir bind mount is not a volume and stays.
                 self.container.remove(v=True)
-                logline += " and removed (with volumes)"
+                logline += " and removed"
 
             print(f"{logline}.")
 

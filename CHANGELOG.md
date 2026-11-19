@@ -349,6 +349,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Stop calling `populate()` on deprecated `make`s in tests #1678
 - Repair a stale raw external checksum when a container is reused #1678
 - Force the v1 recompute selection attempt in its test fixture #1678
+- Remove the test MySQL container's data volume with the container #XXXX
 - Monitor open NWBs, and close under RAM or file-descriptior pressure. Adds
     `close_nwb()` (and implements for `fetch_dataframe` and similar),
     `custom.nwb_cache` config, and a `psutil` dependency #1606
