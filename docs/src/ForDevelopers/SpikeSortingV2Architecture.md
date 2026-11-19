@@ -413,7 +413,7 @@ resolves registered artifact paths without cache healing, downloads, or
 directory creation. Execution revalidates the same snapshots before writing
 results; missing development-schema fields require recreation.
 
-Scientific boundaries use `spyglass.spikesorting._numerical` to reject
+Scientific boundaries use `spyglass.utils.numerical` to reject
 fractional or overflowing identifiers, malformed shapes, nonfinite observations
 and misaligned event arrays before conversion. Sample-frame bounds apply equally
 to affine and explicit clocks. Legal event order and repeated frames are

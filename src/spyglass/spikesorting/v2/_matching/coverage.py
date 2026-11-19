@@ -18,7 +18,7 @@ from spyglass.spikesorting.v2._core.signal_math import (
     _segment_times_slice,
     frames_for_times,
 )
-from spyglass.spikesorting._numerical import integer_vector
+from spyglass.utils.numerical import integer_vector
 from spyglass.spikesorting.v2._storage.spikeinterface import close_nwb_recording
 from spyglass.utils.nwb_helper_fn import raw_eseries_path_and_timestamp_mode
 

@@ -9,7 +9,7 @@ import json
 from collections.abc import Callable, Hashable, Mapping
 from typing import TYPE_CHECKING
 
-from spyglass.spikesorting._numerical import integer_scalar
+from spyglass.utils.numerical import integer_scalar
 from spyglass.spikesorting.v2._core.parameter_identity import (
     parameter_fingerprint,
 )

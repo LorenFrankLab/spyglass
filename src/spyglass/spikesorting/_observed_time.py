@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from spyglass.spikesorting._intervals import intersect_intervals
-from spyglass.spikesorting._numerical import finite_intervals, finite_vector
+from spyglass.utils.numerical import finite_intervals, finite_vector
 
 
 def compact_observation_intervals(intervals_by_unit):

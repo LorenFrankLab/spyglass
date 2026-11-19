@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from spyglass.spikesorting._intervals import _normalize
-from spyglass.spikesorting._numerical import (
+from spyglass.utils.numerical import (
     finite_intervals,
     finite_scalar,
     finite_vector,

@@ -21,7 +21,7 @@ from typing import Any, NamedTuple
 import numpy as np
 import pandas as pd
 
-from spyglass.spikesorting._numerical import (
+from spyglass.utils.numerical import (
     integer_scalar,
     integer_vector,
 )

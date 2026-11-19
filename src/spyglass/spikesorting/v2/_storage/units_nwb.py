@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pynwb
 
-from spyglass.spikesorting._numerical import (
+from spyglass.utils.numerical import (
     finite_intervals,
     finite_scalar,
     finite_vector,

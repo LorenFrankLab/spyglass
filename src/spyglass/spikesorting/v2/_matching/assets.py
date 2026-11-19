@@ -7,7 +7,7 @@ from pathlib import Path
 import h5py
 
 from spyglass.spikesorting.v2._matching.coverage import stored_analysis_path
-from spyglass.spikesorting._numerical import integer_vector
+from spyglass.utils.numerical import integer_vector
 from spyglass.spikesorting.v2._storage.units_nwb import (
     SPIKE_SAMPLE_INDEX_COLUMN,
 )
