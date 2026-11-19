@@ -367,6 +367,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Add `spyglass.utils.numerical` validators for integer and finite numeric
+    arguments #XXXX
 
 ### Pipelines
 
