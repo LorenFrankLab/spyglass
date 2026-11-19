@@ -167,6 +167,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - `FigURLCuration.get_labels` and `get_merge_groups` accept a figpack figure
+        URL (sortingview>=0.15 with `SORTINGVIEW_BACKEND=figpack`) #1728
 
 ## [0.6.0] (Sep 1st 2026)
 
