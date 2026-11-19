@@ -14,6 +14,9 @@ import pandas as pd
 import pynwb
 import pytest
 
+# The writer registers analysis files against the ingested sample session.
+pytestmark = pytest.mark.usefixtures("mini_insert")
+
 
 class _StubSorting:
     """Minimal stand-in for ``si.BaseSorting``.

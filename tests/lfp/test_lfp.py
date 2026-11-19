@@ -5,8 +5,6 @@ import numpy as np
 import pytest
 from pandas import DataFrame, Index
 
-from spyglass.common.common_interval import IntervalList
-
 
 @pytest.fixture(scope="module")
 def lfp_raw(lfp_analysis_raw):
@@ -223,6 +221,7 @@ def test_imported_lfp_skipped_series_keeps_file_position(lfp, monkeypatch):
     position among *ingested* series would give a file's second series a
     different identity depending on whether the first had data.
     """
+    from spyglass.common.common_interval import IntervalList
     from spyglass.utils.mixins import ingestion
 
     monkeypatch.setattr(

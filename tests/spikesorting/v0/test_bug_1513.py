@@ -9,6 +9,9 @@ Fix1513Status.
 
 import pytest
 
+# Fix1513Status checks permissions against the LabMember rows mini_insert adds.
+pytestmark = pytest.mark.usefixtures("mini_insert")
+
 # -- Helpers ----------------------------------------------------------
 
 

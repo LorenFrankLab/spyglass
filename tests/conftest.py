@@ -296,6 +296,19 @@ try:
 except Exception:
     pass  # numcodecs not installed — nothing to unregister
 
+# The test container starts on the first DataJoint connection, so a run that
+# never connects starts none. SERVER is created in pytest_configure.
+_dj_connect = dj.Connection.connect
+
+
+def _connect_after_server_wait(self):
+    """Start the test MySQL container if needed, wait for it, then connect."""
+    SERVER.wait()
+    return _dj_connect(self)
+
+
+dj.Connection.connect = _connect_after_server_wait
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -831,7 +844,7 @@ def _repair_raw_checksum(nwbfile_tbl, mini_dict):
     _write_external_checksum(abs_path, common_schema.external["raw"], row)
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(scope="session")
 def mini_insert(
     dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
@@ -888,21 +901,21 @@ def mini_dict(mini_copy_name):
 
 
 @pytest.fixture(scope="session")
-def common(dj_conn):
+def common(dj_conn, mini_insert):
     from spyglass import common
 
     yield common
 
 
 @pytest.fixture(scope="session")
-def data_import(dj_conn):
+def data_import(dj_conn, mini_insert):
     from spyglass import data_import
 
     yield data_import
 
 
 @pytest.fixture(scope="session")
-def settings(dj_conn):
+def settings(dj_conn, mini_insert):
     from spyglass import settings
 
     yield settings
@@ -1131,7 +1144,7 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 
 
 @pytest.fixture(scope="session")
-def pos_merge_tables(dj_conn):
+def pos_merge_tables(dj_conn, mini_insert):
     """Return the merge tables as activated."""
     from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
