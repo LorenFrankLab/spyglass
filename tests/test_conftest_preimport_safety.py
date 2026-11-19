@@ -9,12 +9,6 @@ import pytest
 import tests.conftest as conftest
 
 
-@pytest.fixture(scope="session")
-def mini_insert():
-    """Override the database-wide autouse fixture for these harness tests."""
-    yield
-
-
 def test_preimport_guard_allows_no_spyglass_modules():
     """The normal fresh-process import order remains accepted."""
     conftest._refuse_preimported_spyglass({})

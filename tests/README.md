@@ -108,6 +108,16 @@ defined in `tests/conftest.py`.
 - `lfp`: spyglass.lfp module
 - `sgl`: spyglass.linearization module
 
+### Requesting the Database
+
+`mini_insert` ingests the sample NWB file. `common`, `data_import`, `settings`
+and `pos_merge_tables` request it, so every fixture built on them does too. If
+your test reads ingested rows, request one of these fixtures, or add
+`pytestmark = pytest.mark.usefixtures("mini_insert")` to the module; a test
+that only needs a connection can request `dj_conn`. The MySQL container starts
+on the first DataJoint connection, so tests that request none of these and
+import no Spyglass table module run without one.
+
 ______________________________________________________________________
 
 ## Mocking Infrastructure

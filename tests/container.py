@@ -78,7 +78,8 @@ class DockerMySQLManager:
                 atexit.register(self.stop)  # stop container on python exit
             if restart:
                 self.stop()  # stop container if it exists
-            self.start()
+            # wait() starts the container, so runs that never use the
+            # database start none.
 
     def _get_existing_container_port(self, container_name: str) -> int:
         """Get port of existing container with given name, if it exists.
