@@ -216,7 +216,7 @@ To facilitate operations on the time intervals, the `IntervalList` table has a
 `fetch_interval` method that returns the relevant `valid_times` as an `Interval`
 object, with associated methods for manipulating intervals (e.g., `union`,
 `intersect`, `contains`, etc.). For a full list op methods, see
-[api documentation](https://lorenfranklab.github.io/spyglass/latest/api/common/common_interval/#spyglass.common.common_interval.Interval).
+[api documentation](https://lorenfranklab.github.io/spyglass/latest/api/utils/interval/#spyglass.utils.interval.Interval).
 
 ## Primary and Foreign Key References
 
