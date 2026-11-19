@@ -872,7 +872,7 @@ class Interval:
         Works on indices:
             intervals1 = [(0, 5), (8, 10)]
             intervals2 = [(1, 2), (3, 4), (6, 9)]
-            result = [(0, 1), (4, 5), (9, 10)]
+            result = [(0, 1), (2, 3), (4, 5), (9, 10)]
 
         Parameters
         ----------
@@ -900,14 +900,17 @@ class Interval:
             while j < len(intervals2) and intervals2[j][1] <= start1:
                 j += 1  # Skip intervals2 that end before start1
             current_start = start1
-            while j < len(intervals2) and intervals2[j][0] < end1:
-                start2, end2 = intervals2[j]
+            # Scan with k, leaving j in place: an interval in intervals2 can
+            # also overlap the next interval in intervals1
+            k = j
+            while k < len(intervals2) and intervals2[k][0] < end1:
+                start2, end2 = intervals2[k]
                 # Add the non-overlap before the current interval in intervals2
                 if current_start < start2:
                     result.append((current_start, min(start2, end1)))
                 # Update the current start to exclude the overlapping part
                 current_start = max(current_start, end2)
-                j += 1  # next interval in intervals2
+                k += 1  # next interval in intervals2
             if current_start < end1:  # if non-overlap btwn last part and end1
                 result.append((current_start, end1))
             i += 1  # next interval in intervals1
