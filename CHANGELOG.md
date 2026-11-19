@@ -377,6 +377,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
         from disk, so a rebuilt file is checked again #1609
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Move `Interval` to `spyglass.utils.interval`, importable without a
+        database; `common_interval` re-exports it #XXXX
 
 - Decoding
 
