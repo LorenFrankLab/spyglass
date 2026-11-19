@@ -1303,7 +1303,7 @@ def estimate_motion_in_spans(
     )
     from spyglass.utils import logger
 
-    require_validated_spikeinterface("span motion estimation")
+    require_validated_spikeinterface("span_motion_estimation")
     if recording.get_num_segments() != 1:
         raise ValueError(
             "Motion estimation: expected a single-segment recording; got "

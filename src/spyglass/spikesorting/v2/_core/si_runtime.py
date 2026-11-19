@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import threading
 from contextlib import contextmanager
+from typing import NamedTuple
 
 import numpy as np
 
@@ -20,33 +21,116 @@ from spyglass.utils import logger
 
 _SORTER_RUNTIME_LOCK = threading.RLock()
 
-#: SI versions whose internals v2's copies and patches are validated against.
-#: Narrower than ``spikesorting._si_compat.TESTED_SI_VERSIONS`` (v0/v1 reads).
-VALIDATED_SI_PREFIXES = ("0.104",)
+
+class SIReproduction(NamedTuple):
+    """One v2 copy or patch of SpikeInterface internals.
+
+    Attributes
+    ----------
+    reproduces : str
+        What the copy fixes or reproduces.
+    validated_si : tuple of str
+        SpikeInterface version prefixes it is validated against.
+    probe : str
+        How it checks SpikeInterface at run time, or why it does not.
+    """
+
+    reproduces: str
+    validated_si: tuple[str, ...]
+    probe: str
 
 
-def require_validated_spikeinterface(what: str) -> None:
-    """Refuse to run code that reproduces SpikeInterface internals.
+#: Each v2 copy or patch of SpikeInterface internals, validated on its own so
+#: a new release can keep one and drop another (``Dependencies.md``). Stricter
+#: than the v0/v1 read shims' ``spikesorting._si_compat.TESTED_SI_VERSIONS``.
+SI_REPRODUCTIONS: dict[str, SIReproduction] = {
+    "nn_noise_overlap_sparsity": SIReproduction(
+        reproduces=(
+            "nearest_neighbors_noise_overlap with the median template "
+            "sparsified (SI picks the peak channel of the dense template, so "
+            "sparse analyzers get NaN) and noise drawn from the statistics "
+            "spans"
+        ),
+        validated_si=("0.104",),
+        probe=(
+            "none: showing the defect needs a sparse analyzer with median "
+            "templates (about 2 s), and the span draw has no upstream "
+            "counterpart"
+        ),
+    ),
+    "isolation_kdtree": SIReproduction(
+        reproduces=(
+            "_compute_isolation's exact neighbor search on scipy's threaded "
+            "cKDTree instead of scikit-learn's single-threaded tree"
+        ),
+        validated_si=("0.104",),
+        probe="none: a speed change, not a defect; the version is the gate",
+    ),
+    "sd_ratio_statistics_spans": SIReproduction(
+        reproduces=(
+            "compute_sd_ratio's template correction, with spikes and samples "
+            "counted over the statistics spans"
+        ),
+        validated_si=("0.104",),
+        probe=(
+            "none: SI has no statistics spans, so no upstream defect to "
+            "detect; checking the copied correction needs an analyzer"
+        ),
+    ),
+    "span_whitening": SIReproduction(
+        reproduces=(
+            'compute_whitening_matrix (mode="global", its eps rule) on '
+            "samples drawn from the statistics spans"
+        ),
+        validated_si=("0.104",),
+        probe=(
+            "the first use in a process compares the copy with SI's matrix on "
+            "a small synthetic recording (_sorting.dispatch)"
+        ),
+    ),
+    "expected_nan_metric_eligibility": SIReproduction(
+        reproduces=(
+            "the spike-count and firing-rate conditions under which SI leaves "
+            "a quality metric NaN"
+        ),
+        validated_si=("0.104",),
+        probe="none: checking a condition computes SI metrics on an analyzer",
+    ),
+    "span_motion_estimation": SIReproduction(
+        reproduces=(
+            "estimate_motion's peak detection, localization and estimation "
+            "steps, run on the statistics spans"
+        ),
+        validated_si=("0.104",),
+        probe="none: a check runs peak detection and DREDge (seconds)",
+    ),
+}
+
+
+def require_validated_spikeinterface(reproduction: str) -> None:
+    """Refuse a reproduction outside the SI versions it is validated on.
 
     Parameters
     ----------
-    what : str
-        The reproduction about to run, named in the error.
+    reproduction : str
+        Key of the reproduction about to run in :data:`SI_REPRODUCTIONS`.
 
     Raises
     ------
     RuntimeError
-        If the installed SpikeInterface is outside ``VALIDATED_SI_PREFIXES``.
+        If the installed SpikeInterface is outside the entry's
+        ``validated_si``.
     """
     import spikeinterface
 
+    entry = SI_REPRODUCTIONS[reproduction]
     version = spikeinterface.__version__
-    if not version.startswith(VALIDATED_SI_PREFIXES):
+    if not version.startswith(entry.validated_si):
         raise RuntimeError(
-            f"spikesorting v2: {what} reproduces SpikeInterface "
-            f"{', '.join(VALIDATED_SI_PREFIXES)} internals, but SpikeInterface "
-            f"{version} is installed. Install the pinned version with the "
-            "'spikesorting' extra (spikeinterface==0.104.3)."
+            f"spikesorting v2: {reproduction} reproduces SpikeInterface "
+            f"{', '.join(entry.validated_si)} internals ({entry.reproduces}), "
+            f"but SpikeInterface {version} is installed. Install the pinned "
+            "version with the 'spikesorting' extra (spikeinterface==0.104.3)."
         )
 
 

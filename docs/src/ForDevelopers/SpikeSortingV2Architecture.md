@@ -1184,9 +1184,14 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
 each patch once a fixed SpikeInterface is adopted.
 
 These patches, `expected_missing_units`, `estimate_motion_in_spans` and the
-span whitening matrix reproduce SpikeInterface 0.104 internals. Each calls
-`_core.si_runtime.require_validated_spikeinterface`, which raises
-`RuntimeError` on any other SpikeInterface version.
+span whitening matrix reproduce SpikeInterface 0.104 internals. Each has an
+entry in `_core.si_runtime.SI_REPRODUCTIONS`: what it reproduces, the
+SpikeInterface versions it is validated on, and its run-time probe or why it
+has none. Each calls `require_validated_spikeinterface` with its entry's key,
+which raises `RuntimeError` on a SpikeInterface version outside that entry, so
+a new release can be validated for one reproduction and not another. The span
+whitening matrix is also compared with SpikeInterface's on a small synthetic
+recording the first time a process uses it.
 
 - `nn_noise_overlap`: SpikeInterface's `nearest_neighbors_noise_overlap`
     sparsifies the noise cluster to the unit's channels but takes the peak

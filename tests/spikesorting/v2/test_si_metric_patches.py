@@ -872,6 +872,24 @@ def _enter_nn_noise_overlap_patch():
         pass
 
 
+def _enter_isolation_patch():
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        patch_isolation_kdtree,
+    )
+
+    with patch_isolation_kdtree():
+        pass
+
+
+def _enter_sd_ratio_patch():
+    from spyglass.spikesorting.v2._core.si_metric_patches import (
+        patch_sd_ratio_statistics_spans,
+    )
+
+    with patch_sd_ratio_statistics_spans():
+        pass
+
+
 def _expected_missing_units():
     from spyglass.spikesorting.v2._curation.metrics import (
         expected_missing_units,
@@ -904,21 +922,78 @@ def _span_whitening_matrix():
     _span_whitening_matrix(None, [], random_seed=0)
 
 
-@pytest.mark.parametrize(
-    "reproduction",
-    [
-        _enter_nn_noise_overlap_patch,
-        _expected_missing_units,
-        _estimate_motion_in_spans,
-        _span_whitening_matrix,
-    ],
-)
+#: ``SI_REPRODUCTIONS`` key -> a call that enters that reproduction.
+_REPRODUCTIONS = {
+    "nn_noise_overlap_sparsity": _enter_nn_noise_overlap_patch,
+    "isolation_kdtree": _enter_isolation_patch,
+    "sd_ratio_statistics_spans": _enter_sd_ratio_patch,
+    "expected_nan_metric_eligibility": _expected_missing_units,
+    "span_motion_estimation": _estimate_motion_in_spans,
+    "span_whitening": _span_whitening_matrix,
+}
+
+
+def test_every_spikeinterface_reproduction_is_exercised():
+    """Each ``SI_REPRODUCTIONS`` entry has a call in ``_REPRODUCTIONS``."""
+    from spyglass.spikesorting.v2._core.si_runtime import SI_REPRODUCTIONS
+
+    assert set(_REPRODUCTIONS) == set(SI_REPRODUCTIONS)
+
+
+@pytest.mark.parametrize("name", sorted(_REPRODUCTIONS))
 def test_spikeinterface_reproductions_refuse_an_unvalidated_version(
-    monkeypatch, reproduction
+    monkeypatch, name
 ):
     """Code that copies SpikeInterface 0.104 internals refuses another SI."""
     import spikeinterface
 
     monkeypatch.setattr(spikeinterface, "__version__", "0.105.0")
     with pytest.raises(RuntimeError, match=r"0\.105\.0"):
-        reproduction()
+        _REPRODUCTIONS[name]()
+
+
+@pytest.mark.parametrize("name", sorted(_REPRODUCTIONS))
+def test_each_reproduction_is_validated_on_its_own_entry(monkeypatch, name):
+    """A release validated for every other entry still refuses this one."""
+    import spikeinterface
+
+    from spyglass.spikesorting.v2._core import si_runtime
+
+    monkeypatch.setattr(spikeinterface, "__version__", "0.105.0")
+    for other, entry in list(si_runtime.SI_REPRODUCTIONS.items()):
+        if other != name:
+            monkeypatch.setitem(
+                si_runtime.SI_REPRODUCTIONS,
+                other,
+                entry._replace(validated_si=("0.105",)),
+            )
+            si_runtime.require_validated_spikeinterface(other)
+    with pytest.raises(RuntimeError, match=name):
+        _REPRODUCTIONS[name]()
+
+
+def test_span_whitening_probe_refuses_a_changed_spikeinterface(monkeypatch):
+    """The first-use probe passes on the installed SI and catches a change."""
+    import importlib
+
+    from spyglass.spikesorting.v2._sorting import dispatch
+
+    # ``spikeinterface.preprocessing.whiten`` is also a function name there.
+    si_whiten = importlib.import_module("spikeinterface.preprocessing.whiten")
+
+    probe = dispatch._check_span_whitening_matches_spikeinterface
+    real = si_whiten.compute_whitening_matrix
+
+    def changed(*args, **kwargs):
+        whitening, mean = real(*args, **kwargs)
+        return whitening * 2, mean
+
+    probe.cache_clear()
+    try:
+        probe()
+        probe.cache_clear()
+        monkeypatch.setattr(si_whiten, "compute_whitening_matrix", changed)
+        with pytest.raises(RuntimeError, match="no longer reproduces"):
+            _span_whitening_matrix()
+    finally:
+        probe.cache_clear()

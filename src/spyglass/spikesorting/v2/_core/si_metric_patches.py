@@ -415,13 +415,13 @@ def _nn_noise_overlap_sparse_fixed(
 
 
 @contextlib.contextmanager
-def _patched(target, attr: str, replacement, *, description: str):
+def _patched(target, attr: str, replacement, *, reproduction: str):
     """Set ``target.<attr>`` to ``replacement`` while any block is active.
 
-    Raises ``RuntimeError`` outside the validated SI family, naming
-    ``description``.
+    Raises ``RuntimeError`` outside the SI versions ``reproduction`` (an
+    ``SI_REPRODUCTIONS`` key) is validated on.
     """
-    require_validated_spikeinterface(description)
+    require_validated_spikeinterface(reproduction)
     key = (id(target), attr)
     with _ACTIVE_PATCHES_LOCK:
         entry = _ACTIVE_PATCHES.get(key)
@@ -448,7 +448,7 @@ def patch_nn_noise_overlap_sparsity():
         _pm,
         "nearest_neighbors_noise_overlap",
         _nn_noise_overlap_sparse_fixed,
-        description="nn_noise_overlap sparsity patch",
+        reproduction="nn_noise_overlap_sparsity",
     )
 
 
@@ -540,7 +540,7 @@ def patch_isolation_kdtree():
         _pm,
         "_compute_isolation",
         _compute_isolation_kdtree,
-        description="k-d tree isolation patch",
+        reproduction="isolation_kdtree",
     )
 
 
@@ -699,5 +699,5 @@ def patch_sd_ratio_statistics_spans():
         _mm.SDRatio,
         "metric_function",
         _sd_ratio_statistics_spans,
-        description="sd_ratio statistics-span patch",
+        reproduction="sd_ratio_statistics_spans",
     )

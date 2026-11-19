@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from typing import NamedTuple
 
 # Container-only sorters; the container comes from execution_params.
@@ -348,21 +349,64 @@ def _span_whitening_matrix(recording, spans, *, random_seed: int):
     Raises
     ------
     RuntimeError
-        If the installed SpikeInterface is not the version this mirrors.
+        If the installed SpikeInterface is not the version this mirrors, or
+        its whitening no longer matches this copy.
     """
+    from spyglass.spikesorting.v2._core.si_runtime import (
+        require_validated_spikeinterface,
+    )
+
+    require_validated_spikeinterface("span_whitening")
+    _check_span_whitening_matches_spikeinterface()
+    return _whitening_matrix_from_samples(
+        _sample_statistics_spans(
+            recording, spans, seed=random_seed, return_in_uV=False
+        )
+    )
+
+
+@functools.cache
+def _check_span_whitening_matches_spikeinterface() -> None:
+    """Raise unless SI's global whitening still equals this copy's.
+
+    One span covering a synthetic recording longer than SI's 20 x 500 ms
+    sample must give SI's matrix exactly; about 2 ms, once per process.
+    """
+    import numpy as np
+    import spikeinterface
+    import spikeinterface.core as sc
+    from spikeinterface.preprocessing.whiten import compute_whitening_matrix
+
+    # Unit-variance samples take SI's data-dependent eps branch.
+    traces = np.random.default_rng(0).standard_normal((20_000, 3))
+    recording = sc.NumpyRecording(
+        [traces.astype(np.float32)], sampling_frequency=1000.0
+    )
+    expected, _ = compute_whitening_matrix(
+        recording, "global", {"seed": 0}, apply_mean=False
+    )
+    copied = _whitening_matrix_from_samples(
+        _sample_statistics_spans(
+            recording, [(0, 20_000)], seed=0, return_in_uV=False
+        )
+    )
+    if not np.array_equal(copied, expected):
+        raise RuntimeError(
+            "spikesorting v2: span whitening no longer reproduces "
+            f"SpikeInterface {spikeinterface.__version__}'s global whitening "
+            "matrix on one full span. Review SI_REPRODUCTIONS"
+            "['span_whitening'] in _core/si_runtime.py."
+        )
+
+
+def _whitening_matrix_from_samples(data):
+    """SI's global whitening matrix from ``(n_rows, n_channels)`` samples."""
     import numpy as np
     from spikeinterface.preprocessing.whiten import (
         compute_whitening_from_covariance,
     )
 
-    from spyglass.spikesorting.v2._core.si_runtime import (
-        require_validated_spikeinterface,
-    )
-
-    require_validated_spikeinterface("span whitening")
-    data = _sample_statistics_spans(
-        recording, spans, seed=random_seed, return_in_uV=False
-    ).astype(np.float32)
+    data = data.astype(np.float32)
     cov = data.T @ data
     cov = cov / data.shape[0]
     # SI 0.104.3's eps=None rule (its docstring's 1e-8 is wrong).

@@ -561,7 +561,7 @@ def expected_missing_units(
         If the installed SpikeInterface is not the version these predicates
         reproduce.
     """
-    require_validated_spikeinterface("expected-NaN metric eligibility")
+    require_validated_spikeinterface("expected_nan_metric_eligibility")
     unit_ids = list(n_spikes_by_unit)
     n_spikes = np.array([n_spikes_by_unit[u] for u in unit_ids], dtype=float)
     expected: dict[str, set | None] = {}

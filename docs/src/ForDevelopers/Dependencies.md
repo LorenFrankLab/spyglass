@@ -24,7 +24,37 @@ non-sorting pipelines import without it.
     change sorts. The `test_*_si_defaults_unchanged` snapshots
     (`test_si_default_snapshots.py`) fail on a bump: move the pin and audit the
     snapshot diff together. `environment_spikesorting_v2.yml` must carry the
-    same pin (`test_spikeinterface_hard_pin_matches_v2_env`).
+    same pin (`test_spikeinterface_hard_pin_matches_v2_env`). See
+    [Supporting a new SpikeInterface version](#supporting-a-new-spikeinterface-version).
+
+## Supporting a new SpikeInterface version
+
+Moving the pin costs these reviews and runs:
+
+- `SI_REPRODUCTIONS` (`spikesorting/v2/_core/si_runtime.py`): each entry is a v2
+    copy or patch of SpikeInterface internals and lists the versions it is
+    validated on; any other version raises. Review each against the new
+    release's source, run its test, then add the version to the entry, or
+    remove the patch if SpikeInterface fixed the defect.
+
+    | Entry | Test |
+    | --- | --- |
+    | `nn_noise_overlap_sparsity` | `test_patched_nn_noise_overlap_is_finite_on_sparse_many_channel` |
+    | `isolation_kdtree` | `test_isolation_patch_matches_spikeinterface` |
+    | `sd_ratio_statistics_spans` | `test_template_correction_reproduces_spikeinterface` |
+    | `span_whitening` | `test_span_whitening_matrix_matches_spikeinterface_on_full_span` |
+    | `expected_nan_metric_eligibility` | `test_classifier_agrees_with_si_nan_pattern_*` |
+    | `span_motion_estimation` | `test_unmasked_single_span_estimate_equals_compute_motion` |
+
+- `TESTED_SI_VERSIONS` (`spikesorting/_si_compat.py`): v0/v1 read paths warn
+    outside it. Add the version once `tests/spikesorting/test_si_compat.py`,
+    `test_si_compat_cross_generation.py` and
+    `test_legacy_modern_si_coexistence.py` pass; an API the release moved is
+    one more `_PROVIDERS` entry.
+- The `test_*_si_defaults_unchanged` snapshots (`test_si_default_snapshots.py`)
+    and the rest of `test_si_metric_patches.py`.
+- Lanes: the v2 shards, `v2-matching`, `v2-curation`, `v2-supported-python` and
+    `core`. `legacy` stays on SpikeInterface 0.99.
 
 ## `spikesorting-v2` extras
 
