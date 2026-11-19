@@ -6,9 +6,6 @@ from typing import NamedTuple
 
 import numpy as np
 
-from spyglass.spikesorting._intervals import (
-    intersect_intervals,
-)
 from spyglass.spikesorting.v2._core.signal_math import (
     artifact_frame_ranges,
     boundary_spans_from_timestamps,
@@ -20,6 +17,7 @@ from spyglass.spikesorting.v2._storage.spikeinterface import (
     use_pickle_recording_serialization,
 )
 from spyglass.utils import logger
+from spyglass.utils.interval import Interval
 
 
 def apply_artifact_mask(
@@ -249,7 +247,7 @@ def statistics_spans(
     valid_samples = sum(b - a for a, b in valid)
     out = [
         (int(a), int(b))
-        for a, b in intersect_intervals(valid, boundary_spans, merge=False)
+        for a, b in Interval(valid, warn=False).intersect(boundary_spans).times
     ]
     if not out:
         raise ValueError(

@@ -441,32 +441,36 @@ their lifecycle and serialization checks when changing supported versions.
 
 ### Interval operations
 
-Time intervals in seconds use `common_interval.Interval`, for example the sort
-interval within the raw data valid times
-(`_recording.restriction.intended_save_intervals`). v2 keeps its own helpers
-only where a caller depends on a result `Interval` does not give, or where the
-helper must import without a database.
-`tests/spikesorting/v2/test_interval_library_parity.py` runs each helper against
-`Interval` and names the caller of each difference.
+Interval sets in seconds and in frames use `spyglass.utils.interval.Interval`,
+which imports without a database, for example the sort interval within the raw
+data valid times (`_recording.restriction.intended_save_intervals`). Build it
+with `warn=False`: outside tests the default logs duplicate or overlapping rows
+and fails on an empty `(0, 2)` array.
 
-- `_core.signal_math.subtract_intervals` cuts each base row separately, applies
-    a removal that spans a gap to both rows, ignores zero-length removals and,
+- Observation masks are intersected with `intersect(merge_touching=True)`,
+    which merges touching rows and cannot leave overlapping output from a
+    zero-length row; `ObservationAvailability.valid_bins` needs that one form.
+    `ObservationAvailability.restrict`, `population_availability` and
+    `intersect_interval_sets` (merged units' `obs_intervals`) use it.
+- `consolidate(merge_touching=True)` merges manual exclusions
+    (`normalize_manual_exclusions`), `observed_metrics` windows after dropping
+    zero-length rows, and frame ranges in `complement_frame_ranges` and
+    `_recording.restriction`. Integer frames stay int64.
+- Frame spans that meet at a timestamp gap stay separate rows: statistics spans
+    and `observed_intervals` use the default `intersect`.
+- `_observed_time.contains_times` is `contains(half_open_mask=True)`: a spike
+    at a stop was not observed.
+
+v2 keeps its own helper only where a caller needs a result `Interval` does not
+give. `tests/spikesorting/v2/test_interval_library_parity.py` checks each
+option against the result its caller needs and names the caller of each
+difference.
+
+- `_core.signal_math.subtract_intervals` ignores zero-length removals and,
     with `inclusive_stop=True`, treats a stop as the last sample's time (manual
     exclusions against artifact valid times).
-- `spikesorting/_intervals.intersect_intervals` drops zero-length rows and
-    merges touching rows, so observation masks have one form;
-    `ObservationAvailability.valid_bins` needs that form.
-    `intersect_interval_sets` (merged units' `obs_intervals`) uses the same rule.
-- `_observed_time.contains_times` is a half-open membership mask, and
-    `_artifacts.manual.ineffective_manual_exclusions` tests half-open exclusions
-    against closed valid rows. `Interval.contains` is closed and returns values.
-- `normalize_manual_exclusions` equals `Interval.union` but stays NumPy-only:
-    importing `common_interval` declares a schema and needs a database
-    connection, and the exclusions are normalized in preflight, selection ids
-    and unit tests.
-- Frame spans (integer, half-open: `complement_frame_ranges`, statistics
-    spans, `merge_sorted_intervals` on frames) are not times and stay outside
-    `Interval`.
+- `_artifacts.manual.ineffective_manual_exclusions` tests half-open exclusions
+    against closed valid rows.
 
 ### Run requests and stages
 

@@ -475,10 +475,7 @@
       "tier": "unit"
     },
     "test_interval_library_parity.py": {
-      "tier": "db_unit",
-      "overrides": {
-        "test_unknown_coverage_leaves_v0_v1_times_unchanged": "unit"
-      }
+      "tier": "unit"
     },
     "test_legacy_runtime_boundary.py": {
       "tier": "db_unit",

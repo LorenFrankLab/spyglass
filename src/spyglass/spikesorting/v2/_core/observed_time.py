@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from spyglass.spikesorting._intervals import _normalize
+from spyglass.utils.interval import Interval
 from spyglass.utils.numerical import (
     finite_intervals,
     finite_scalar,
     finite_vector,
 )
 from spyglass.spikesorting._observed_time import contains_times
-from spyglass.spikesorting._intervals import intersect_intervals
 from spyglass.spikesorting.v2._core.signal_math import _segment_times_at
 from spyglass.spikesorting.v2._core.signal_math import (
     artifact_frame_ranges,
@@ -43,11 +42,12 @@ def observed_intervals(recording, valid_times):
         positive=True,
     )
     # Each kept piece is artifact-free and never crosses a timestamp gap.
-    pieces = intersect_intervals(
-        complement_frame_ranges(excluded, n),
-        boundary_spans_from_timestamps(recording),
-        merge=False,
-    ).astype(np.int64)
+    pieces = (
+        Interval(complement_frame_ranges(excluded, n), warn=False)
+        .intersect(boundary_spans_from_timestamps(recording))
+        .times.reshape(-1, 2)
+        .astype(np.int64)
+    )
     kept = np.column_stack(
         (
             _segment_times_at(recording, pieces[:, 0]),
@@ -89,7 +89,12 @@ def observed_metrics(
     bin_duration_s = finite_scalar(
         bin_duration_s, name="observed_metrics bin_duration_s", positive=True
     )
-    intervals = _normalize(intervals)
+    intervals = intervals[intervals[:, 1] > intervals[:, 0]]
+    intervals = (
+        Interval(intervals, warn=False)
+        .consolidate(merge_touching=True)
+        .times.reshape(-1, 2)
+    )
     duration = float(np.diff(intervals, axis=1).sum())
     spikes = spike_times[contains_times(intervals, spike_times)]
     exposure = {}

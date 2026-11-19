@@ -1,8 +1,7 @@
 """Time/channel restriction + truncation-guard arithmetic behind ``Recording``.
 
 ``select_sort_group_channels`` runs before temporal preprocessing and
-``restrict_recording`` after it. ``restrict_recording`` opens a DB connection
-at call time via its lazy ``Interval`` import.
+``restrict_recording`` after it.
 """
 
 from __future__ import annotations
@@ -275,7 +274,7 @@ def _consolidate_regular_intervals(
     """
     import numpy as np
 
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
+    from spyglass.utils.interval import Interval
 
     intervals = np.asarray(intervals)
     if intervals.ndim == 1:
@@ -296,8 +295,10 @@ def _consolidate_regular_intervals(
     start_indices = np.clip(start_indices, 0, int(n_samples))
     stop_indices = np.clip(stop_indices, 0, int(n_samples))
 
-    consolidated = merge_sorted_intervals(
-        zip(start_indices.tolist(), stop_indices.tolist())
+    consolidated = (
+        Interval(np.column_stack((start_indices, stop_indices)), warn=False)
+        .consolidate(merge_touching=True)
+        .times
     )
     return np.asarray(consolidated, dtype=np.int64).reshape(-1, 2)
 
@@ -338,7 +339,7 @@ def intended_save_intervals(
     np.ndarray
         Intersected intervals, shape ``(n_intervals, 2)`` in seconds.
     """
-    from spyglass.common.common_interval import Interval
+    from spyglass.utils.interval import Interval
 
     return (
         Interval(sort_valid_times)
@@ -532,11 +533,11 @@ def restrict_recording_times(recording, valid_times):
     import numpy as np
     from spikeinterface import concatenate_recordings
 
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
     from spyglass.spikesorting.v2._core.signal_math import (
         base_intervals_and_gaps,
         frames_for_times,
     )
+    from spyglass.utils.interval import Interval
 
     intervals = np.asarray(valid_times, dtype=float).reshape(-1, 2)
     intervals = intervals[np.argsort(intervals[:, 0])]
@@ -563,10 +564,13 @@ def restrict_recording_times(recording, valid_times):
         else:
             starts = frames_for_times(segment, intervals[:, 0])
             stops = frames_for_times(segment, intervals[:, 1], side="right")
-            frames = merge_sorted_intervals(
-                (start, stop)
-                for start, stop in zip(starts.tolist(), stops.tolist())
-                if start < stop
+            keep = starts < stops
+            frames = (
+                Interval(
+                    np.column_stack((starts[keep], stops[keep])), warn=False
+                )
+                .consolidate(merge_touching=True)
+                .times.tolist()
             )
         # SI's frame_slice eagerly slices an explicit HDF5 time vector; the
         # lazy timestamps carry the original clock instead.

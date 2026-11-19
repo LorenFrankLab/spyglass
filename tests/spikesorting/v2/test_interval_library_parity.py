@@ -1,19 +1,15 @@
-"""Parity of the v2 interval helpers with ``common_interval.Interval``.
+"""Parity of the v2 interval helpers with ``spyglass.utils.interval.Interval``.
 
-Each v2 seconds-domain interval operation is run against its closest
-``Interval`` method on the same inputs. A test named ``*_equals_interval*``
-proves the two agree exactly on the inputs its caller can produce. A test
-named ``*_unlike_interval*`` pins a v2 behaviour that ``Interval`` does not
-have; its docstring names the caller that needs it.
-
-``common_interval`` declares a schema on import, so these tests need the
-database fixture even though no table is read.
+v2 runs interval-set algebra through ``Interval``. A test named
+``*_equals_interval*`` proves that a v2 helper, or the ``Interval`` option a
+v2 caller passes, gives exactly the result the caller needs. A test named
+``*_unlike_interval*`` pins a v2 behaviour that ``Interval`` does not have;
+its docstring names the caller that needs it.
 """
 
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 _N_DRAWS = 2000
 
@@ -46,11 +42,11 @@ def _split_first_row(rows):
     return np.concatenate([head, rows[1:]])
 
 
-def _messy_rows(rng, n_max, *, grid=30):
-    """Unsorted, overlapping, touching and duplicated positive-length rows."""
+def _messy_rows(rng, n_max, *, grid=30, min_length=1):
+    """Unsorted, overlapping, touching and duplicated rows."""
     n = int(rng.integers(1, n_max + 1))
     starts = rng.integers(0, grid, size=n)
-    stops = starts + rng.integers(1, 8, size=n)
+    stops = starts + rng.integers(min_length, 8, size=n)
     rows = np.column_stack([starts, stops]).astype(float)
     if rng.random() < 0.5:
         # Off-grid values so float ties are not the only case.
@@ -58,41 +54,48 @@ def _messy_rows(rng, n_max, *, grid=30):
     return _shuffled_with_duplicates(rng, rows)
 
 
+def _sorted_disjoint(rng, n_max, *, grid=60):
+    """Sorted rows that never overlap; touching and zero-length rows allowed.
+
+    The form ``ObservationAvailability`` accepts.
+    """
+    n = int(rng.integers(0, n_max + 1))
+    rows = np.sort(rng.integers(0, grid, size=2 * n)).reshape(-1, 2)
+    return rows.astype(float)
+
+
 # ---------- subtract_intervals vs Interval.subtract -------------------------
 
 
 def _artifact_shaped_draw(rng):
-    """Base chunks and removals shaped like ``detect_artifacts`` builds them.
+    """Base chunks and positive-length removals sorted by start.
 
-    Chunks are sorted and separated by a gap. Each removal has positive
-    length, starts inside one chunk and ends no later than the next chunk's
-    start (the removal window is capped at the chunk end plus one sample).
+    Chunks are sorted and separated by a gap, as ``detect_artifacts`` builds
+    them. A removal may reach across later chunks.
     """
     base = _non_touching(rng, 4)
     base = base[base[:, 1] - base[:, 0] >= 1]
+    stop = base[-1, 1] + 3 if len(base) else 0.0
     removed = []
-    for i, (start, stop) in enumerate(base):
-        limit = base[i + 1, 0] if i + 1 < len(base) else stop + 3
+    for start in base[:, 0]:
         for _ in range(int(rng.integers(0, 4))):
             a = rng.uniform(start, stop)
-            b = rng.uniform(a, limit)
+            b = rng.uniform(a, stop)
             if b > a:
                 removed.append((a, b))
     removed.sort()
     return base.tolist(), removed
 
 
-def test_subtract_intervals_equals_interval_subtract_for_artifact_removal(
-    dj_conn,
-):
-    """Equal when no removal reaches past the next base row's start.
+def test_subtract_intervals_equals_interval_subtract_for_artifact_removal():
+    """Equal for positive-length removals, including ones that span a gap.
 
-    ``detect_artifacts`` caps each removal at its chunk, so it stays inside
-    this domain unless repeated timestamps give a zero-length removal (see
+    ``detect_artifacts`` gives a zero-length removal only when samples share
+    a timestamp (see
     ``test_subtract_intervals_ignores_zero_length_removal_unlike_interval``).
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+    from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(20261117)
     for _ in range(_N_DRAWS):
@@ -106,38 +109,32 @@ def test_subtract_intervals_equals_interval_subtract_for_artifact_removal(
         )
 
 
-def test_subtract_intervals_cuts_a_removal_spanning_two_rows_unlike_interval(
-    dj_conn,
-):
-    """A removal that spans a gap cuts both base rows.
+def test_subtract_intervals_equals_interval_for_a_removal_spanning_two_rows():
+    """A removal that spans a gap cuts both base rows in both.
 
-    ``Interval.subtract`` advances past a removal once it has cut one base
-    row, so the second row keeps the removed time ``[8, 9)``. v2 needs the
-    correct result: ``apply_manual_exclusions`` subtracts a user exclusion
-    that may cover an acquisition gap.
+    ``apply_manual_exclusions`` subtracts a user exclusion that may cover an
+    acquisition gap.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+    from spyglass.utils.interval import Interval
 
     base, removed = [(0.0, 5.0), (8.0, 10.0)], [(4.0, 9.0)]
     assert subtract_intervals(base, removed) == [(0.0, 4.0), (9.0, 10.0)]
     assert Interval(base).subtract(removed).times.tolist() == [
         [0.0, 4.0],
-        [8.0, 10.0],
+        [9.0, 10.0],
     ]
 
 
-def test_subtract_intervals_ignores_zero_length_removal_unlike_interval(
-    dj_conn,
-):
+def test_subtract_intervals_ignores_zero_length_removal_unlike_interval():
     """A zero-length removal removes nothing and does not split the row.
 
     ``Interval.subtract`` splits the base row at it. In ``detect_artifacts``
     an artifact over samples that share one timestamp maps to a zero-length
     removal; splitting there would let ``min_length_s`` drop clean time.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+    from spyglass.utils.interval import Interval
 
     assert subtract_intervals([(0.0, 10.0)], [(5.0, 5.0)]) == [(0.0, 10.0)]
     assert Interval([(0.0, 10.0)]).subtract([(5.0, 5.0)]).times.tolist() == [
@@ -146,7 +143,7 @@ def test_subtract_intervals_ignores_zero_length_removal_unlike_interval(
     ]
 
 
-def test_subtract_intervals_inclusive_stop_unlike_interval(dj_conn):
+def test_subtract_intervals_inclusive_stop_unlike_interval():
     """``inclusive_stop=True`` treats a base stop as the last sample's time.
 
     ``apply_manual_exclusions`` needs it: artifact valid times end on their
@@ -154,8 +151,8 @@ def test_subtract_intervals_inclusive_stop_unlike_interval(dj_conn):
     treats every stop as exclusive, so it keeps a sample the exclusion
     covers and drops the last sample an exclusion ends at.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import subtract_intervals
+    from spyglass.utils.interval import Interval
 
     base = [(0.0, 10.0)]
     # An exclusion starting at the last sample removes that sample.
@@ -173,68 +170,88 @@ def test_subtract_intervals_inclusive_stop_unlike_interval(dj_conn):
     assert Interval(base).subtract([(5.0, 10.0)]).times.tolist() == [[0.0, 5.0]]
 
 
-# ---------- intersect_intervals / intersect_interval_sets -------------------
+# ---------- intersections ----------------------------------------------------
 
 
-def test_intersect_intervals_equals_interval_intersect_without_touching_rows(
-    dj_conn,
-):
-    """Equal for unsorted, duplicated rows whose union has no touching rows.
+def test_intersect_merge_touching_equals_merged_interval_intersect():
+    """``merge_touching=True`` gives the default result, merged.
 
-    Observation masks (``observed_intervals``, artifact valid times, concat
-    ``observation_intervals``) never have touching rows. ``merge=False`` is
-    also equal on disjoint operands, touching rows included.
+    Observation masks (``ObservationAvailability``, ``population_availability``,
+    merged units' ``obs_intervals``) are intersected this way. Rows may be
+    unsorted, duplicated, overlapping, touching or zero-length.
     """
-    from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting._intervals import intersect_intervals
+    from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(1117)
     for _ in range(_N_DRAWS):
-        left = _shuffled_with_duplicates(rng, _non_touching(rng, 5))
-        right = _shuffled_with_duplicates(rng, _non_touching(rng, 5))
-        if not len(left) or not len(right):
-            continue
-        common = _as_rows(Interval(left).intersect(right).times)
+        left = _messy_rows(rng, 6, min_length=0)
+        right = _messy_rows(rng, 6, min_length=0)
+        merged = Interval(left).intersect(right, merge_touching=True).times
+        expected = (
+            Interval(left).intersect(right).consolidate(merge_touching=True)
+        )
         np.testing.assert_array_equal(
-            intersect_intervals(left, right),
-            common,
+            _as_rows(merged),
+            _as_rows(expected.times),
             err_msg=f"left={left.tolist()} right={right.tolist()}",
         )
-        # Disjoint operands with touching rows, for merge=False.
-        left_cut = _split_first_row(np.unique(left, axis=0))
-        right_cut = _split_first_row(np.unique(right, axis=0))
-        np.testing.assert_array_equal(
-            intersect_intervals(left_cut, right_cut, merge=False),
-            _as_rows(Interval(left_cut).intersect(right_cut).times),
-            err_msg=f"left={left_cut.tolist()} right={right_cut.tolist()}",
+        rows = _as_rows(merged)
+        assert (rows[1:, 0] > rows[:-1, 1]).all(), rows.tolist()
+        assert (rows[:, 1] > rows[:, 0]).all(), rows.tolist()
+
+
+def test_intersect_default_keeps_touching_frame_spans_split():
+    """Default ``intersect`` returns every overlap of disjoint operands.
+
+    ``statistics_spans`` and ``observed_intervals`` intersect artifact-free
+    frame ranges with acquisition spans that touch at a timestamp gap; the
+    gap must stay a row boundary. Integer frames stay int64.
+    """
+    from spyglass.utils.interval import Interval
+
+    rng = np.random.default_rng(171)
+    for _ in range(_N_DRAWS):
+        left, right = _non_touching(rng, 5), _non_touching(rng, 5)
+        if not len(left) or not len(right):
+            continue
+        left = _split_first_row(np.floor(left * 2)).astype(np.int64)
+        right = _split_first_row(np.floor(right * 2)).astype(np.int64)
+        expected = sorted(
+            [max(a, c), min(b, d)]
+            for a, b in left.tolist()
+            for c, d in right.tolist()
+            if max(a, c) < min(b, d)
         )
+        result = Interval(left).intersect(right).times
+        assert result.reshape(-1, 2).tolist() == expected
+        if expected:
+            assert result.dtype == np.int64
 
 
-def test_intersect_intervals_merges_touching_rows_unlike_interval(dj_conn):
-    """Touching rows come out merged; ``Interval`` keeps them separate.
+def test_intersect_merge_touching_merges_touching_rows_equals_interval():
+    """Touching rows come out merged; the default keeps them separate.
 
     ``ObservationAvailability.valid_bins`` needs the merged form: a bin
     across the touch point is fully observed, but with split rows it lies
     in neither row and is marked unobserved.
     """
-    from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting._intervals import intersect_intervals
     from spyglass.spikesorting._observed_time import ObservationAvailability
+    from spyglass.utils.interval import Interval
 
     touching = [[0.0, 5.0], [5.0, 10.0]]
-    merged = intersect_intervals(touching, [[0.0, 10.0]])
-    split = Interval(touching).intersect([[0.0, 10.0]]).times
-    assert merged.tolist() == [[0.0, 10.0]]
-    assert split.tolist() == touching
+    merged = Interval(touching).intersect([[0.0, 10.0]], merge_touching=True)
+    split = Interval(touching).intersect([[0.0, 10.0]])
+    assert merged.times.tolist() == [[0.0, 10.0]]
+    assert split.times.tolist() == touching
 
     bins = np.array([0.0, 4.0, 6.0, 9.0])  # bin [4, 6) crosses t = 5
-    assert ObservationAvailability(merged).valid_bins(bins).tolist() == [
+    assert ObservationAvailability(merged.times).valid_bins(bins).tolist() == [
         True,
         True,
         True,
         True,
     ]
-    assert ObservationAvailability(split).valid_bins(bins).tolist() == [
+    assert ObservationAvailability(split.times).valid_bins(bins).tolist() == [
         True,
         False,
         True,
@@ -242,26 +259,26 @@ def test_intersect_intervals_merges_touching_rows_unlike_interval(dj_conn):
     ]
 
 
-def test_intersect_intervals_drops_zero_length_rows_unlike_interval(dj_conn):
-    """Zero-length rows are dropped before merging.
+def test_intersect_merge_touching_drops_zero_length_rows_equals_interval():
+    """A zero-length row cannot stop the merge, so the output never overlaps.
 
-    ``Interval`` consolidates by comparing each row with the last kept one
+    The default consolidation compares each row with the last kept one
     only, so a zero-length row inside ``[0, 5]`` stops ``[4, 8]`` merging
     with it and the result overlaps itself. Inclusive manual exclusions can
     leave a zero-length ``(stop, stop)`` row in stored valid times.
     """
-    from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting._intervals import intersect_intervals
+    from spyglass.utils.interval import Interval
 
     rows = [[0.0, 5.0], [3.0, 3.0], [4.0, 8.0]]
-    assert intersect_intervals(rows, [[0.0, 10.0]]).tolist() == [[0.0, 8.0]]
+    merged = Interval(rows).intersect([[0.0, 10.0]], merge_touching=True)
+    assert merged.times.tolist() == [[0.0, 8.0]]
     assert Interval(rows).intersect([[0.0, 10.0]]).times.tolist() == [
         [0.0, 5.0],
         [4.0, 8.0],
     ]
 
 
-def test_intersect_interval_sets_equals_interval_intersect_chain(dj_conn):
+def test_intersect_interval_sets_equals_interval_intersect_chain():
     """Equal to chained ``Interval.intersect`` on non-touching sets.
 
     The one caller, ``_curated_obs_intervals``, intersects the stored
@@ -269,10 +286,10 @@ def test_intersect_interval_sets_equals_interval_intersect_chain(dj_conn):
     """
     from functools import reduce
 
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import (
         intersect_interval_sets,
     )
+    from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(171117)
     for _ in range(_N_DRAWS):
@@ -289,19 +306,19 @@ def test_intersect_interval_sets_equals_interval_intersect_chain(dj_conn):
         )
 
 
-# ---------- merges: normalize_manual_exclusions, _normalize -----------------
+# ---------- merges -----------------------------------------------------------
 
 
-def test_normalize_manual_exclusions_equals_interval_union(dj_conn):
+def test_normalize_manual_exclusions_equals_interval_union():
     """The sorted union, as Python floats, equals ``Interval.union``.
 
     ``Interval.union`` merges touching rows (a start sorts before an equal
-    stop); ``Interval.consolidate`` does not, so it is not the equivalent.
+    stop), as ``consolidate(merge_touching=True)`` does.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._core.signal_math import (
         normalize_manual_exclusions,
     )
+    from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(20261117)
     for _ in range(_N_DRAWS):
@@ -312,61 +329,74 @@ def test_normalize_manual_exclusions_equals_interval_union(dj_conn):
         assert all(type(value) is float for row in v2 for value in row)
 
 
-def test_normalize_equals_interval_union_of_positive_length_rows(dj_conn):
-    """``_normalize`` (and so ``merge_sorted_intervals`` on seconds) is the
-    ``Interval.union`` of the positive-length rows.
+def test_consolidate_merge_touching_equals_interval_union():
+    """``consolidate(merge_touching=True)`` equals ``Interval.union``.
 
-    The zero-length filter has no ``Interval`` equivalent that keeps
-    ``Interval.union``'s touching merge (see
-    ``test_intersect_intervals_drops_zero_length_rows_unlike_interval``).
+    Zero-length rows included: one inside or touching another row merges
+    into it, an isolated one is kept. ``complement_frame_ranges`` and
+    ``restrict_recording_times`` merge frame ranges this way, and
+    ``observed_metrics`` merges observation windows after dropping
+    zero-length rows.
     """
-    from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting._intervals import _normalize
+    from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(1171)
     for _ in range(_N_DRAWS):
-        rows = _messy_rows(rng, 6)
-        zero = rng.integers(0, 30, size=(int(rng.integers(0, 3)), 1))
-        rows = np.concatenate([rows, np.hstack([zero, zero]).astype(float)])
-        positive = rows[rows[:, 1] > rows[:, 0]]
+        rows = _messy_rows(rng, 6, min_length=0)
         np.testing.assert_array_equal(
-            _normalize(rows),
-            _as_rows(Interval(positive).union([]).times),
+            Interval(rows).consolidate(merge_touching=True).times,
+            Interval(rows).union([]).times,
             err_msg=rows.tolist(),
         )
+    frames = np.array([[5, 9], [0, 2], [2, 3], [7, 7], [12, 12]])
+    merged = Interval(frames).consolidate(merge_touching=True).times
+    assert merged.dtype == np.int64
+    assert merged.tolist() == [[0, 3], [5, 9], [12, 12]]
 
 
 # ---------- membership and overlap predicates -------------------------------
 
 
-def test_contains_times_is_half_open_unlike_interval_contains(dj_conn):
-    """``contains_times`` excludes the stop and returns a mask.
+def test_contains_times_equals_interval_half_open_mask():
+    """``contains_times`` is ``Interval.contains(half_open_mask=True)``.
 
     Observation intervals are half-open, so a spike at a stop was not
-    observed. ``Interval.contains`` includes both ends and returns the
-    contained values, not a per-time mask.
+    observed. The default ``Interval.contains`` includes both ends and
+    returns the contained values, not a per-time mask.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting._observed_time import contains_times
+    from spyglass.utils.interval import Interval
 
     times = np.array([0.0, 0.5, 1.0])
     assert contains_times([[0.0, 1.0]], times).tolist() == [True, True, False]
     assert Interval([[0.0, 1.0]]).contains(times).tolist() == [0.0, 0.5, 1.0]
 
+    rng = np.random.default_rng(31)
+    for _ in range(_N_DRAWS):
+        rows = _sorted_disjoint(rng, 6)
+        times = np.r_[rows.ravel(), rng.uniform(-2, 62, size=10)]
+        expected = (
+            (rows[:, None, 0] <= times) & (times < rows[:, None, 1])
+        ).any(axis=0)
+        np.testing.assert_array_equal(
+            contains_times(rows, times), expected, err_msg=rows.tolist()
+        )
+        np.testing.assert_array_equal(
+            Interval(rows).contains(times, half_open_mask=True), expected
+        )
 
-def test_ineffective_manual_exclusions_counts_a_closed_stop_unlike_interval(
-    dj_conn,
-):
+
+def test_ineffective_manual_exclusions_counts_a_closed_stop_unlike_interval():
     """An exclusion starting at a valid row's stop overlaps it.
 
     The row's stop is its last sample, which ``apply_manual_exclusions``
     removes; ``Interval.intersect`` finds no overlap there.
     """
-    from spyglass.common.common_interval import Interval
     from spyglass.spikesorting.v2._artifacts.manual import (
         apply_manual_exclusions,
         ineffective_manual_exclusions,
     )
+    from spyglass.utils.interval import Interval
 
     valid, exclusion = [[0.0, 10.0]], [[10.0, 11.0]]
     assert ineffective_manual_exclusions(exclusion, valid) == []
@@ -383,8 +413,8 @@ def test_unknown_coverage_leaves_v0_v1_times_unchanged():
     """v0/v1 sources have no observation snapshot, so nothing is restricted.
 
     ``SpikeSortingOutput`` and ``SortedSpikesGroup`` give v0/v1 sources
-    ``ObservationAvailability(None)``; the ``_intervals`` helpers are then
-    not called and v0/v1 times pass through bit for bit.
+    ``ObservationAvailability(None)``; ``Interval`` is then not called and
+    v0/v1 times pass through bit for bit.
     """
     from spyglass.spikesorting._observed_time import ObservationAvailability
 
@@ -400,14 +430,13 @@ def test_unknown_coverage_leaves_v0_v1_times_unchanged():
         assert unknown.valid_bins(times).all()
 
 
-@pytest.mark.parametrize("merge", [True, False])
-def test_intersect_intervals_of_identical_sets_returns_the_set(dj_conn, merge):
+def test_intersect_of_identical_sets_returns_the_set():
     """The common single-sort case: every unit has the same mask."""
-    from spyglass.common.common_interval import Interval
-    from spyglass.spikesorting._intervals import intersect_intervals
+    from spyglass.utils.interval import Interval
 
     rows = np.array([[0.0, 1.0], [2.0, 3.5], [7.0, 9.0]])
-    np.testing.assert_array_equal(
-        intersect_intervals(rows, rows, merge=merge), rows
-    )
-    np.testing.assert_array_equal(Interval(rows).intersect(rows).times, rows)
+    for merge_touching in (True, False):
+        np.testing.assert_array_equal(
+            Interval(rows).intersect(rows, merge_touching=merge_touching).times,
+            rows,
+        )

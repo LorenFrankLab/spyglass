@@ -599,6 +599,11 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         `motion_estimation_params`, `motion_interpolation_params`,
         `matcher_params`); a row with a `params` key is refused. No
         fingerprint or id changes #1609
+    - v2 interval operations use `spyglass.utils.interval.Interval`, which
+        gains `merge_touching` on `intersect` and `consolidate` and
+        `half_open_mask` on `contains`, and intersects disjoint lists in one
+        pass; `spikesorting/_intervals.py` is removed. No stored value or id
+        changes #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

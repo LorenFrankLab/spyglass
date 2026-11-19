@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from spyglass.spikesorting._intervals import intersect_intervals
+from spyglass.utils.interval import Interval
 from spyglass.utils.numerical import finite_intervals, finite_vector
 
 
@@ -55,10 +55,7 @@ def contains_times(intervals, times):
     times = finite_vector(
         times.reshape(-1), name="contains_times times"
     ).reshape(shape)
-    if not len(intervals):
-        return np.zeros(times.shape, dtype=bool)
-    indices = np.searchsorted(intervals[:, 0], times, side="right") - 1
-    return (indices >= 0) & (times < intervals[np.maximum(indices, 0), 1])
+    return Interval(intervals, warn=False).contains(times, half_open_mask=True)
 
 
 @dataclass(frozen=True)
@@ -115,7 +112,11 @@ class ObservationAvailability:
         )
         if self.intervals is None:
             return intervals
-        return intersect_intervals(intervals, self.intervals)
+        return (
+            Interval(intervals, warn=False)
+            .intersect(self.intervals, merge_touching=True)
+            .times.reshape(-1, 2)
+        )
 
     def valid_bins(self, time):
         """Only bins wholly inside an observed span are available."""
@@ -158,6 +159,8 @@ def population_availability(snapshots):
             common = (
                 intervals
                 if common is None
-                else intersect_intervals(common, intervals)
+                else Interval(common, warn=False)
+                .intersect(intervals, merge_touching=True)
+                .times.reshape(-1, 2)
             )
     return ObservationAvailability(common, tuple(unknown))

@@ -173,7 +173,7 @@ def intersect_interval_sets(interval_sets):
     """
     import numpy as np
 
-    from spyglass.spikesorting._intervals import intersect_intervals
+    from spyglass.utils.interval import Interval
 
     sets = [
         np.asarray(s, dtype=float).reshape(-1, 2)
@@ -184,7 +184,11 @@ def intersect_interval_sets(interval_sets):
         return np.empty((0, 2), dtype=float)
     acc = sets[0]
     for other in sets[1:]:
-        acc = intersect_intervals(acc, other)
+        acc = (
+            Interval(acc, warn=False)
+            .intersect(other, merge_touching=True)
+            .times.reshape(-1, 2)
+        )
         if acc.size == 0:
             break
     return acc
@@ -820,11 +824,13 @@ def complement_frame_ranges(
         Sorted, disjoint, half-open valid frame ranges. ``[(0, n_samples)]``
         when ``excluded_ranges`` is empty.
     """
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
+    from spyglass.utils.interval import Interval
 
     n_samples = int(n_samples)
-    merged = merge_sorted_intervals(
-        sorted((int(a), int(b)) for a, b in excluded_ranges)
+    merged = (
+        Interval([(int(a), int(b)) for a, b in excluded_ranges], warn=False)
+        .consolidate(merge_touching=True)
+        .times.tolist()
     )
 
     valid: list[tuple[int, int]] = []
@@ -957,7 +963,7 @@ def normalize_manual_exclusions(intervals):
     """Sorted union of finite [start, stop) intervals in session seconds."""
     import numpy as np
 
-    from spyglass.spikesorting._intervals import merge_sorted_intervals
+    from spyglass.utils.interval import Interval
 
     if intervals is None:
         return []
@@ -975,4 +981,5 @@ def normalize_manual_exclusions(intervals):
             "with start < stop, in absolute session timestamps (the "
             "IntervalList valid_times clock, in seconds)."
         )
-    return merge_sorted_intervals(sorted(values.tolist()))
+    merged = Interval(values, warn=False).consolidate(merge_touching=True)
+    return merged.times.tolist()

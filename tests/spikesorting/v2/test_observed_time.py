@@ -135,11 +135,15 @@ def test_observed_metrics_weight_partial_bins_and_ignore_excluded_spikes():
     )
 
 
-def test_intersect_intervals_normalizes_duplicates_and_order():
-    from spyglass.spikesorting._intervals import intersect_intervals
+def test_merge_touching_intersect_normalizes_duplicates_and_order():
+    """The intersection ``ObservationAvailability.restrict`` uses."""
+    from spyglass.utils.interval import Interval
+
+    def intersect(left, right):
+        return Interval(left).intersect(right, merge_touching=True).times
 
     duplicated = np.array([[0.0, 10.0], [0.0, 10.0]])
-    result = intersect_intervals(duplicated, duplicated)
+    result = intersect(duplicated, duplicated)
     np.testing.assert_array_equal(result, [[0.0, 10.0]])
     assert np.diff(result, axis=1).sum() == 10.0
 
@@ -147,26 +151,26 @@ def test_intersect_intervals_normalizes_duplicates_and_order():
     sorted_left = np.array([[0.0, 2.0], [5.0, 6.0]])
     right = np.array([[0.0, 6.0]])
     np.testing.assert_array_equal(
-        intersect_intervals(unsorted_left, right),
-        intersect_intervals(sorted_left, right),
+        intersect(unsorted_left, right),
+        intersect(sorted_left, right),
     )
 
     # Overlapping and adjacent rows on one operand merge before intersecting.
     overlapping = np.array([[0.0, 5.0], [4.0, 10.0]])
     np.testing.assert_array_equal(
-        intersect_intervals(overlapping, np.array([[0.0, 10.0]])),
+        intersect(overlapping, np.array([[0.0, 10.0]])),
         [[0.0, 10.0]],
     )
     adjacent = np.array([[0.0, 5.0], [5.0, 10.0]])
     np.testing.assert_array_equal(
-        intersect_intervals(adjacent, np.array([[0.0, 10.0]])),
+        intersect(adjacent, np.array([[0.0, 10.0]])),
         [[0.0, 10.0]],
     )
 
     # Zero-length rows are dropped.
     with_zero_length = np.array([[3.0, 3.0], [4.0, 6.0]])
     np.testing.assert_array_equal(
-        intersect_intervals(with_zero_length, np.array([[0.0, 10.0]])),
+        intersect(with_zero_length, np.array([[0.0, 10.0]])),
         [[4.0, 6.0]],
     )
 
@@ -406,13 +410,13 @@ def test_shared_masks_are_stored_once_and_keep_original_fingerprint(
     )
     assert len(json.dumps(compact)) < len(json.dumps(by_unit)) / 2
     intersections = []
-    original = math.intersect_intervals
+    original = math.Interval.intersect
 
-    def intersect(a, b):
-        intersections.append((a, b))
-        return original(a, b)
+    def intersect(self, other, *args, **kwargs):
+        intersections.append((self.times, other))
+        return original(self, other, *args, **kwargs)
 
-    monkeypatch.setattr(math, "intersect_intervals", intersect)
+    monkeypatch.setattr(math.Interval, "intersect", intersect)
     all_shared = math.population_availability(
         [("source", list(range(500)), {"observation_intervals": compact})]
     )
