@@ -213,9 +213,9 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
 
     @classmethod
     def get_labels(cls, curation_json) -> Dict[int, List[str]]:
-        """Uses kachery cloud to load curation json. Returns labelsByUnit."""
+        """Loads curation json (see `_load_curation`). Returns labelsByUnit."""
 
-        labels_by_unit = kcl.load_json(curation_json).get("labelsByUnit")
+        labels_by_unit = _load_curation(curation_json).get("labelsByUnit")
         return (
             {
                 int(unit_id): curation_label_list
@@ -227,8 +227,21 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
 
     @classmethod
     def get_merge_groups(cls, curation_json) -> Dict:
-        """Uses kachery cloud to load curation json. Returns mergeGroups."""
-        return kcl.load_json(curation_json).get("mergeGroups", {})
+        """Loads curation json (see `_load_curation`). Returns mergeGroups."""
+        return _load_curation(curation_json).get("mergeGroups", {})
+
+
+def _load_curation(curation_json: str) -> dict:
+    """Load a curation from a kachery/GitHub URI or a figpack figure URL.
+
+    With SORTINGVIEW_BACKEND=figpack, FigURLCuration.url is a figpack figure,
+    which saves its curation with the figure rather than to a GitHub URI.
+    """
+    if curation_json.startswith(("http://", "https://")):
+        from sortingview.figpack_backend import load_curation  # >=0.15
+
+        return load_curation(curation_json)
+    return kcl.load_json(curation_json)
 
 
 def _generate_figurl(
