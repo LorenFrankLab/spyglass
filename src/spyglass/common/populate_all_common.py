@@ -37,6 +37,7 @@ from spyglass.common.common_optogenetics import (
 )
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
+from spyglass.common.common_sleep import SeizureEvents, SleepStateScoring
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
@@ -211,6 +212,8 @@ def populate_all_common(
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
+            SleepStateScoring,  # Depends on Session
+            SeizureEvents,  # Depends on Session
         ],
     ]
 

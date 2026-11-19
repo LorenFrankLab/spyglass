@@ -58,6 +58,7 @@ from spyglass.common.common_position import (
 from spyglass.common.common_region import BrainRegion
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
+from spyglass.common.common_sleep import SeizureEvents, SleepStateScoring
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import Task, TaskEpoch
 from spyglass.common.common_user import UserEnvironment
@@ -118,8 +119,10 @@ __all__ = [
     "RawCompassDirection",
     "RawPosition",
     "SampleCount",
+    "SeizureEvents",
     "SensorData",
     "Session",
+    "SleepStateScoring",
     "StateScriptFile",
     "Subject",
     "Task",
