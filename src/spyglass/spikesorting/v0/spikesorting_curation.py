@@ -24,6 +24,7 @@ from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
 from spyglass.spikesorting import _si_compat
+from spyglass.spikesorting.utils import _get_recording_timestamps
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -1243,7 +1244,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         logger.info(f"Found {len(accepted_units)} accepted units")
 
         recording = _si_compat.load_extractor(recording_path)
-        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+        timestamps = _get_recording_timestamps(recording)
 
         analysis_file_name, units_object_id = Curation().save_sorting_nwb(
             key=key,

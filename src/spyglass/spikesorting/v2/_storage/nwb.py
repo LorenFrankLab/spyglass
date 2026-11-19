@@ -303,9 +303,7 @@ def write_nwb_artifact(
         SpikeInterfaceRecordingDataChunkIterator,
         TimestampsDataChunkIterator,
     )
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _get_recording_timestamps,
-    )
+    from spyglass.spikesorting.utils import _get_recording_timestamps
     from spyglass.spikesorting.v2._storage.metadata import (
         electrode_table_region,
         resolve_conversion_and_offset,
@@ -351,8 +349,10 @@ def write_nwb_artifact(
         sampling_frequency = assert_positive_sampling_frequency(
             recording.get_sampling_frequency(), context="write_nwb_artifact: "
         )
-        timestamps = _get_recording_timestamps(
-            recording, override=timestamps_override
+        timestamps = (
+            _get_recording_timestamps(recording)
+            if timestamps_override is None
+            else timestamps_override
         )
         # HDMF grows all-channel buffers along time to about the square root
         # of this ~30 s budget (~8 s at 32 ch).
@@ -537,9 +537,7 @@ def write_recording_artifact(
         saved_end, sampling_frequency, n_channels, duration_s, n_samples)``.
         The saved times and ``n_samples`` describe the persisted traces.
     """
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _get_recording_timestamps,
-    )
+    from spyglass.spikesorting.utils import _get_recording_timestamps
 
     analysis_file_name = None
     try:
@@ -558,8 +556,10 @@ def write_recording_artifact(
         # Multiple intervals: the override's span would count the gaps, so
         # use the concatenation's gap-free time axis.
         if n_selected_intervals == 1:
-            saved_times = _get_recording_timestamps(
-                recording, override=timestamps_override
+            saved_times = (
+                _get_recording_timestamps(recording)
+                if timestamps_override is None
+                else timestamps_override
             )
             saved_start = float(saved_times[0])
             saved_end = float(saved_times[-1])

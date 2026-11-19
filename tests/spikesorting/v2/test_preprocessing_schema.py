@@ -110,9 +110,7 @@ def test_get_recording_timestamps_concatenates_multi_segment():
     import numpy as np
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _get_recording_timestamps,
-    )
+    from spyglass.spikesorting.utils import _get_recording_timestamps
 
     seg0 = np.zeros((100, 4), dtype="float32")
     seg1 = np.zeros((150, 4), dtype="float32")
@@ -131,24 +129,32 @@ def test_get_recording_timestamps_concatenates_multi_segment():
     )
 
 
-def test_get_recording_timestamps_override_returned_verbatim():
-    """A caller-supplied persisted-timestamps vector is returned untouched.
+def test_saved_span_is_measured_on_the_timestamps_override():
+    """The saved span comes from the caller's persisted timestamps.
 
     ``Recording.make`` passes the persisted wall-clock times, which SI's
-    ``frame_slice`` drops.
+    ``frame_slice`` drops; without them the recording's own times are used.
     """
     import numpy as np
     import spikeinterface.core as sc
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _get_recording_timestamps,
-    )
+    from spyglass.spikesorting.v2._storage.nwb import write_recording_artifact
 
     rec = sc.NumpyRecording(
         [np.zeros((50, 4), dtype="float32")], sampling_frequency=1000.0
     )
-    persisted = np.linspace(10.0, 20.0, 50)
-    out = _get_recording_timestamps(rec, override=persisted)
-    np.testing.assert_array_equal(out, persisted)
-    # Not the native times (which start at 0.0), confirming override wins.
-    assert not np.array_equal(out, rec.get_times())
+
+    def saved_span(timestamps_override):
+        result = write_recording_artifact(
+            rec,
+            nwb_file_name="unused.nwb",
+            timestamps_override=timestamps_override,
+            n_selected_intervals=1,
+            sampling_frequency=1000.0,
+            filtering_description="",
+            writer=lambda **_: ("unused.nwb", "object-id", "hash"),
+        )
+        return result.saved_start, result.saved_end
+
+    assert saved_span(np.linspace(10.0, 20.0, 50)) == (10.0, 20.0)
+    assert saved_span(None) == (0.0, 0.049)

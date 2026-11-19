@@ -6,13 +6,7 @@ import numpy as np
 import scipy.stats as stats
 import spikeinterface as si
 
-from spyglass.common.common_ephys import Electrode
 from spyglass.spikesorting import _si_compat
-
-# Re-exported: v0/v1 import it from this module.
-from spyglass.spikesorting._recording_timestamps import (  # noqa: F401
-    _get_recording_timestamps,
-)
 from spyglass.utils import logger
 
 
@@ -45,6 +39,9 @@ def get_group_by_shank(
     omit_unitrode : bool
         Optional. If True, no sort groups are defined for unitrodes.
     """
+    # Imported here so importing this module declares no schema.
+    from spyglass.common.common_ephys import Electrode
+
     # get the electrodes from this NWB file
     electrodes = (
         Electrode()
@@ -266,6 +263,41 @@ def _check_artifact_thresholds(
         )
         proportion_above_thresh = 1
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
+
+
+def _get_recording_timestamps(recording):
+    """Return the timestamps of every segment of ``recording``, concatenated.
+
+    ``recording.get_times()`` returns only one segment's times.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+
+    Returns
+    -------
+    np.ndarray
+        ``(total_frames,)`` timestamps in seconds.
+    """
+    num_segments = recording.get_num_segments()
+
+    if num_segments <= 1:
+        return recording.get_times()
+
+    frames_per_segment = [0] + [
+        recording.get_num_frames(segment_index=i) for i in range(num_segments)
+    ]
+
+    cumsum_frames = np.cumsum(frames_per_segment)
+    total_frames = np.sum(frames_per_segment)
+
+    timestamps = np.zeros((total_frames,))
+    for i in range(num_segments):
+        start_index = cumsum_frames[i]
+        end_index = cumsum_frames[i + 1]
+        timestamps[start_index:end_index] = recording.get_times(segment_index=i)
+
+    return timestamps
 
 
 def read_raw_nwb_recording(

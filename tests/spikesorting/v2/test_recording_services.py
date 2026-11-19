@@ -322,14 +322,14 @@ def test_lazy_timestamp_override_rejects_fancy_indexing_clearly():
         override[np.array([True, False, True])]
 
 
-def test_get_recording_timestamps_preserves_lazy_override():
-    """A lazy override must not be forced through np.asarray before the NWB
-    chunk iterator has a chance to stream it."""
+def test_timestamps_iterator_streams_a_lazy_override(monkeypatch):
+    """A lazy override reaches the NWB chunk iterator unconverted, so it is
+    streamed chunk by chunk rather than materialized by np.asarray."""
     from spyglass.spikesorting.v2._recording.restriction import (
         _lazy_timestamp_override,
     )
-    from spyglass.spikesorting.v2._core.signal_math import (
-        _get_recording_timestamps,
+    from spyglass.spikesorting.v2._storage.iterators import (
+        TimestampsDataChunkIterator,
     )
 
     override = _lazy_timestamp_override(
@@ -338,7 +338,14 @@ def test_get_recording_timestamps_preserves_lazy_override():
         t_start=5.0,
     )
 
-    assert _get_recording_timestamps(None, override=override) is override
+    def _refuse_whole_array(*args, **kwargs):
+        raise AssertionError("the lazy override was materialized whole")
+
+    monkeypatch.setattr(type(override), "__array__", _refuse_whole_array)
+    streamed = [
+        chunk.data for chunk in TimestampsDataChunkIterator(timestamps=override)
+    ]
+    np.testing.assert_array_equal(np.concatenate(streamed), [5.0, 6.0, 7.0])
 
 
 def test_raw_eseries_timestamp_mode_detects_rate_vs_explicit(tmp_path):

@@ -18,6 +18,7 @@ from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting._legacy_runtime import (
     _require_legacy_si_environment,
 )
+from spyglass.spikesorting.utils import _get_recording_timestamps
 from spyglass.spikesorting.v0.spikesorting_artifact import (
     ArtifactRemovedIntervalList,
 )
@@ -223,7 +224,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             _require_legacy_si_environment("v0 SpikeSorting.make")
         recording = _si_compat.load_extractor(recording_path)
         # first, get the timestamps
-        timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
+        timestamps = _get_recording_timestamps(recording)
         _ = recording.get_sampling_frequency()
 
         # then concatenate the recordings

@@ -107,43 +107,6 @@ def assert_artifact_frame_fraction(
         )
 
 
-def _get_recording_timestamps(
-    recording,
-    override=None,
-):
-    """Return the absolute-time vector for a SpikeInterface recording.
-
-    Concatenates all segments (``get_times()`` returns only one). Returns
-    ``override`` verbatim when given, since SI's ``frame_slice`` and
-    ``concatenate_recordings`` drop the source's wall-clock timestamps.
-
-    Parameters
-    ----------
-    recording : si.BaseRecording
-        Source recording whose timestamps are needed.
-    override : array-like, optional
-        Persisted timestamps to return verbatim.
-
-    Returns
-    -------
-    array-like
-        ``(total_frames,)`` wall-clock seconds. Lazy timestamp overrides are
-        returned as-is; otherwise the return is a ``numpy.ndarray``.
-    """
-    import numpy as np
-
-    if override is not None:
-        if getattr(override, "_spyglass_lazy_timestamps", False):
-            return override
-        return np.asarray(override)
-
-    from spyglass.spikesorting._recording_timestamps import (
-        _get_recording_timestamps as _concatenated_segment_times,
-    )
-
-    return _concatenated_segment_times(recording)
-
-
 def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
     """Remove ``removed`` from each ``base`` interval separately.
 

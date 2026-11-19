@@ -1542,8 +1542,6 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     from spyglass.common import IntervalList  # noqa: F401
     from spyglass.common.common_lab import LabTeam
     from spyglass.common.common_nwbfile import AnalysisNwbfile
-    from spyglass.spikesorting.v2._storage import nwb as _recording_nwb
-    from spyglass.spikesorting.v2._core import signal_math as utils_mod
     from spyglass.spikesorting.v2.recording import (
         PreprocessingParameters,
         Recording,
@@ -1575,33 +1573,19 @@ def test_recording_fresh_write_cleanup_unlinks_staged_file(
     captured = {}
     real_write = Recording._write_nwb_artifact
 
-    def _capture_write(*args, **kwargs):
-        result = real_write(*args, **kwargs)
-        captured["analysis_file_name"] = result[0]
-        return result
-
-    real_ts = utils_mod._get_recording_timestamps
-
     def _raise_after_write(*args, **kwargs):
-        # Only the post-write saved-times derivation raises, so the file is
-        # already staged.
-        if "analysis_file_name" in captured:
-            raise RuntimeError("staged-file cleanup probe: post-write boom")
-        return real_ts(*args, **kwargs)
+        raise RuntimeError("staged-file cleanup probe: post-write boom")
+
+    def _capture_write(**kwargs):
+        result = real_write(**kwargs)
+        captured["analysis_file_name"] = result[0]
+        # The post-write measurement reads the sample count, so it raises
+        # with the file already staged.
+        kwargs["recording"].get_num_samples = _raise_after_write
+        return result
 
     monkeypatch.setattr(
         Recording, "_write_nwb_artifact", staticmethod(_capture_write)
-    )
-    monkeypatch.setattr(
-        utils_mod, "_get_recording_timestamps", _raise_after_write
-    )
-    # The artifact pipeline imports this at call time; guard against a
-    # module-level rebind.
-    monkeypatch.setattr(
-        _recording_nwb,
-        "_get_recording_timestamps",
-        _raise_after_write,
-        raising=False,
     )
 
     try:

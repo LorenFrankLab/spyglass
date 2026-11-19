@@ -20,7 +20,6 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import recording_dir
 from spyglass.spikesorting import _si_compat
 from spyglass.spikesorting.utils import (
-    _get_recording_timestamps,
     get_group_by_shank,
     read_raw_nwb_recording,
 )
@@ -730,10 +729,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             int(min_length) if min_length != float("inf") else None,
             min_index,
         )
-
-    @staticmethod
-    def _get_recording_timestamps(recording):
-        return _get_recording_timestamps(recording)
 
     def _get_sort_interval_valid_times(self, key):
         """Identifies the intersection between sort interval specified by the user

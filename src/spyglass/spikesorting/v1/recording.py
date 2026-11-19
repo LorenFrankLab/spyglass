@@ -21,7 +21,6 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
-    _get_recording_timestamps,
     get_group_by_shank,
     read_raw_nwb_recording,
 )
@@ -474,10 +473,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
 
         return recording
-
-    @staticmethod
-    def _get_recording_timestamps(recording):
-        return _get_recording_timestamps(recording)
 
     def _get_sort_interval_valid_times(self, key: dict):
         """Identifies the intersection between sort interval specified by the user
