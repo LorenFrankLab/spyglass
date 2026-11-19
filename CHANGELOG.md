@@ -134,7 +134,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
     - Add `SleepStateScoring` (with `.Epoch`) and `SeizureEvents` (with `.Event`)
-        to ingest sleep scoring and seizure `TimeIntervals` tables
+        to ingest sleep scoring and seizure `TimeIntervals` tables #1726
 
 - Decoding
 
