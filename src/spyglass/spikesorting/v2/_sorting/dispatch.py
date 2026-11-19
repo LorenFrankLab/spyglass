@@ -355,7 +355,7 @@ def _span_whitening_matrix(recording, spans, *, random_seed: int):
         compute_whitening_from_covariance,
     )
 
-    from spyglass.spikesorting.v2._core.si_compat import (
+    from spyglass.spikesorting.v2._core.si_runtime import (
         require_validated_spikeinterface,
     )
 
@@ -737,7 +737,7 @@ def run_si_sorter(
         if is_container_backend(execution_params):
             os.chmod(sorter_temp_dir.name, 0o777)
 
-        from spyglass.spikesorting.v2._core.si_compat import (
+        from spyglass.spikesorting.v2._core.si_runtime import (
             sorter_runtime_state,
         )
 

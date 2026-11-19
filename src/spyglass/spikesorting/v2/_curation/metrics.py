@@ -32,7 +32,7 @@ from spyglass.spikesorting.v2._sorting.analyzer import (
 )
 from spyglass.utils import logger
 from spyglass.spikesorting.v2._core.job_config import resolve_search_threads
-from spyglass.spikesorting.v2._core.si_compat import (
+from spyglass.spikesorting.v2._core.si_runtime import (
     require_validated_spikeinterface,
 )
 from spyglass.spikesorting.v2._core.signal_math import _segment_times_at

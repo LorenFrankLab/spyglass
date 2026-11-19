@@ -12,7 +12,7 @@ from collections.abc import Mapping
 
 import datajoint as dj
 
-from spyglass.spikesorting.v2._core.si_compat import get_global_job_kwargs
+from spyglass.spikesorting.v2._core.si_runtime import get_global_job_kwargs
 from spyglass.utils import logger
 from spyglass.utils.parallel import usable_cpus
 

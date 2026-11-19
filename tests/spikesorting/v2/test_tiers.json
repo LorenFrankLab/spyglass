@@ -994,9 +994,6 @@
     "test_shared_artifact_group_members.py": {
       "tier": "unit"
     },
-    "test_si_compat.py": {
-      "tier": "unit"
-    },
     "test_si_default_snapshots.py": {
       "tier": "unit"
     },
@@ -1012,6 +1009,9 @@
       }
     },
     "test_si_metric_threads.py": {
+      "tier": "unit"
+    },
+    "test_si_runtime.py": {
       "tier": "unit"
     },
     "test_signal_math.py": {

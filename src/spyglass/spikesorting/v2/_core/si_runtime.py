@@ -1,9 +1,11 @@
-"""Scoped SpikeInterface sorter compatibility state.
+"""SpikeInterface runtime: global job settings, sorter lock, version gate.
 
 SpikeInterface's sorter wrappers read process-global job settings. Protect
 their temporary settings and MountainSort 4's NumPy alias with one lock so
 Spyglass calls on separate threads cannot overwrite or inherit each other's
-runtime state. Process workers remain independent.
+runtime state. Process workers remain independent. Code that reproduces
+SpikeInterface internals first checks the installed version with
+:func:`require_validated_spikeinterface`.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from spyglass.utils import logger
 _SORTER_RUNTIME_LOCK = threading.RLock()
 
 #: SI versions whose internals v2's copies and patches are validated against.
+#: Narrower than ``spikesorting._si_compat.TESTED_SI_VERSIONS`` (v0/v1 reads).
 VALIDATED_SI_PREFIXES = ("0.104",)
 
 

@@ -1185,7 +1185,7 @@ each patch once a fixed SpikeInterface is adopted.
 
 These patches, `expected_missing_units`, `estimate_motion_in_spans` and the
 span whitening matrix reproduce SpikeInterface 0.104 internals. Each calls
-`_core.si_compat.require_validated_spikeinterface`, which raises
+`_core.si_runtime.require_validated_spikeinterface`, which raises
 `RuntimeError` on any other SpikeInterface version.
 
 - `nn_noise_overlap`: SpikeInterface's `nearest_neighbors_noise_overlap`
@@ -1672,6 +1672,15 @@ while the file is missing from disk; a rebuilt file is checked again.
 - Read paths are not guarded. Renamed loading and `NumpySorting` APIs go through
     `_si_compat`; saved binary waveform folders load as a
     `MockWaveformExtractor` under SI 0.101+ (`_si_compat.load_waveforms`).
+- `_si_compat._PROVIDERS` lists, for each capability, the SI APIs that provide
+    it in order of preference; the first one present is used, so a release
+    that moves an API needs one more provider. The shims are tested on SI 0.99
+    and 0.104 (`TESTED_SI_VERSIONS`). Any other SI warns once instead of
+    raising: these paths only read existing rows, and v0/v1 compute already
+    refuses SI 0.101 and later. A missing provider raises.
+- `numpy_sorting_from_samples_and_labels` checks that the sorting's spike frames
+    span the given samples, which catches a change in what the constructor's
+    first argument means, not only a rename.
 - `clusterless_thresholder` sorting is exempt: it uses `detect_peaks`, not
     `run_sorter`, whose `output_folder` argument SI 0.101+ rejects.
 

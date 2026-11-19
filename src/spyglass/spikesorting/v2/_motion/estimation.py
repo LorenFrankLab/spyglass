@@ -1298,7 +1298,7 @@ def estimate_motion_in_spans(
     from spyglass.spikesorting.v2._core.signal_math import (
         complement_frame_ranges,
     )
-    from spyglass.spikesorting.v2._core.si_compat import (
+    from spyglass.spikesorting.v2._core.si_runtime import (
         require_validated_spikeinterface,
     )
     from spyglass.utils import logger

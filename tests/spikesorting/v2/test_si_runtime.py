@@ -16,7 +16,7 @@ def test_concurrent_sorters_and_ambient_reader_restore_their_own_state(
     import spikeinterface.sorters as sis
 
     from spyglass import settings
-    from spyglass.spikesorting.v2._core import si_compat as _si_compat
+    from spyglass.spikesorting.v2._core import si_runtime
     from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
     from spyglass.spikesorting.v2._core.job_config import _ambient_job_kwargs
 
@@ -35,7 +35,7 @@ def test_concurrent_sorters_and_ambient_reader_restore_their_own_state(
     sorting = si.NumpySorting.from_unit_dict(
         {1: np.array([20, 40])}, sampling_frequency=1000.0
     )
-    runtime_state = _si_compat.sorter_runtime_state
+    runtime_state = si_runtime.sorter_runtime_state
 
     def requested_runtime_state(sorter, jobs):
         if jobs["n_jobs"] == 3:
@@ -43,7 +43,7 @@ def test_concurrent_sorters_and_ambient_reader_restore_their_own_state(
         return runtime_state(sorter, jobs)
 
     monkeypatch.setattr(
-        _si_compat, "sorter_runtime_state", requested_runtime_state
+        si_runtime, "sorter_runtime_state", requested_runtime_state
     )
 
     def run_sorter(**kwargs):
@@ -106,7 +106,7 @@ def test_nested_sorter_state_restores_outer_settings(monkeypatch):
     import numpy as np
     import spikeinterface as si
 
-    from spyglass.spikesorting.v2._core.si_compat import sorter_runtime_state
+    from spyglass.spikesorting.v2._core.si_runtime import sorter_runtime_state
 
     monkeypatch.delattr(np, "Inf", raising=False)
     original = dict(si.get_global_job_kwargs())
@@ -123,7 +123,7 @@ def test_nested_sorter_state_restores_outer_settings(monkeypatch):
 def test_existing_numpy_alias_is_preserved(monkeypatch):
     import numpy as np
 
-    from spyglass.spikesorting.v2._core.si_compat import sorter_runtime_state
+    from spyglass.spikesorting.v2._core.si_runtime import sorter_runtime_state
 
     existing_alias = object()
     monkeypatch.setattr(np, "Inf", existing_alias, raising=False)

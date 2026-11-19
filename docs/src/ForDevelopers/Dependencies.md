@@ -35,7 +35,7 @@ non-sorting pipelines import without it.
     needs 3.15.
 - `mountainsort4==1.0.7`: the version `test_mountainsort4_runtime.py` exercises.
     It runs on numpy 2 because the sorter runtime adds the removed `np.Inf`
-    alias for the duration of an MS4 sort (`_core/si_compat.py`);
+    alias for the duration of an MS4 sort (`_core/si_runtime.py`);
     spikeextractors 0.9.11 still references it.
 - `numpy>=2,<3`: torch 2 and SI 0.104 resolve on numpy 2.
 - `torch>=2`: `MotionEstimate` estimates with SpikeInterface's `dredge_ap`,

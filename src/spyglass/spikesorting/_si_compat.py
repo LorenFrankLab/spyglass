@@ -2,17 +2,104 @@
 
 Existing v0/v1 rows hold objects written under SI 0.99, so read paths must
 work with either API generation. Attribute presence, not version parsing,
-selects the implementation.
+selects the implementation: ``_PROVIDERS`` lists where each generation
+provides a capability, and the first one present is used.
 """
 
 from __future__ import annotations
 
+import functools
+import importlib
+import importlib.util
+import warnings
+
+#: SpikeInterface releases these shims are tested on: 0.99 in the legacy CI
+#: lane, 0.104 in the others. Other releases warn. v2's copies of SI
+#: internals are validated separately (``v2/_core/si_runtime.py``).
+TESTED_SI_VERSIONS = ("0.99", "0.104")
+
+#: Capability -> its providers in order of preference: a
+#: ``"module:attribute"`` target and the keyword arguments it is called with.
+#: A release that moves an API needs one more provider here.
+_PROVIDERS: dict[str, tuple[tuple[str, dict], ...]] = {
+    # ``metrics``, not ``metrics.quality``, which lacks ``compute_num_spikes``.
+    "quality_metrics_module": (
+        ("spikeinterface.metrics", {}),
+        ("spikeinterface.qualitymetrics", {}),
+    ),
+    "load_extractor": (
+        ("spikeinterface:load_extractor", {}),
+        ("spikeinterface:load", {}),
+    ),
+    # SI 0.99 also has ``load_waveforms``, so its own loader comes first.
+    "load_waveforms": (
+        ("spikeinterface:WaveformExtractor.load_from_folder", {}),
+        ("spikeinterface:load_waveforms", {"with_recording": False}),
+    ),
+    "numpy_sorting_from_samples_and_labels": (
+        ("spikeinterface.core:NumpySorting.from_samples_and_labels", {}),
+        ("spikeinterface.core:NumpySorting.from_times_labels", {}),
+    ),
+}
+
+
+@functools.cache
+def _warn_if_untested() -> None:
+    """Warn once per process if the installed SI is not a tested release."""
+    import spikeinterface
+    from packaging.version import Version
+
+    installed = spikeinterface.__version__
+    release = ".".join(str(part) for part in Version(installed).release[:2])
+    if release not in TESTED_SI_VERSIONS:
+        warnings.warn(
+            f"SpikeInterface {installed} is installed, but the v0/v1 "
+            "read-path shims (spyglass.spikesorting._si_compat) are tested "
+            f"only on SpikeInterface {', '.join(TESTED_SI_VERSIONS)}. Reading "
+            "saved v0/v1 recordings, sortings and waveforms may fail.",
+            RuntimeWarning,
+            stacklevel=4,
+        )
+
+
+def _lookup(target: str):
+    """Return the object at ``"module:attribute.path"``, or ``None``."""
+    module_name, _, attribute_path = target.partition(":")
+    if importlib.util.find_spec(module_name) is None:
+        return None
+    found = importlib.import_module(module_name)
+    for attribute in filter(None, attribute_path.split(".")):
+        found = getattr(found, attribute, None)
+        if found is None:
+            return None
+    return found
+
+
+def _provider(capability: str):
+    """Return the first provider of ``capability`` the installed SI has.
+
+    Raises
+    ------
+    RuntimeError
+        If SpikeInterface has none of the capability's providers.
+    """
+    _warn_if_untested()
+    for target, kwargs in _PROVIDERS[capability]:
+        found = _lookup(target)
+        if found is not None:
+            return functools.partial(found, **kwargs) if kwargs else found
+    import spikeinterface
+
+    targets = ", ".join(target for target, _ in _PROVIDERS[capability])
+    raise RuntimeError(
+        f"SpikeInterface {spikeinterface.__version__} has none of {targets} "
+        f"for {capability!r}; add its API to "
+        "spyglass.spikesorting._si_compat._PROVIDERS."
+    )
+
 
 def quality_metrics_module():
     """Return SpikeInterface's quality-metrics namespace for either generation.
-
-    Returns ``metrics`` rather than ``metrics.quality``, which lacks
-    ``compute_num_spikes``.
 
     Returns
     -------
@@ -20,11 +107,7 @@ def quality_metrics_module():
         ``spikeinterface.metrics``, or ``spikeinterface.qualitymetrics`` under
         SpikeInterface 0.99.
     """
-    try:
-        import spikeinterface.metrics as sq
-    except ModuleNotFoundError:  # SI 0.99 (legacy v0/v1 runtime env)
-        import spikeinterface.qualitymetrics as sq
-    return sq
+    return _provider("quality_metrics_module")
 
 
 def load_extractor(source):
@@ -41,10 +124,7 @@ def load_extractor(source):
     spikeinterface.BaseRecording | spikeinterface.BaseSorting
         The deserialized extractor.
     """
-    import spikeinterface as si
-
-    loader = getattr(si, "load_extractor", None) or si.load
-    return loader(source)
+    return _provider("load_extractor")(source)
 
 
 def load_waveforms(folder):
@@ -68,15 +148,10 @@ def load_waveforms(folder):
         When the folder holds Zarr-format legacy waveforms, which 0.101 and
         later cannot read.
     """
-    import spikeinterface as si
-
     from spyglass.spikesorting._legacy_runtime import _legacy_runtime_message
 
-    legacy = getattr(si, "WaveformExtractor", None)
-    if legacy is not None:
-        return legacy.load_from_folder(folder)
     try:
-        return si.load_waveforms(folder, with_recording=False)
+        return _provider("load_waveforms")(folder)
     except NotImplementedError as exc:  # Zarr-format legacy waveforms
         raise RuntimeError(
             _legacy_runtime_message(
@@ -92,15 +167,40 @@ def numpy_sorting_from_samples_and_labels(
 
     SI 0.99 names it ``from_times_labels``; 0.101+ uses
     ``from_samples_and_labels`` with the same positional arguments.
-    """
-    from spikeinterface.core import NumpySorting
 
-    constructor = getattr(
-        NumpySorting, "from_samples_and_labels", None
-    ) or getattr(NumpySorting, "from_times_labels")
-    return constructor(
+    Raises
+    ------
+    RuntimeError
+        If the sorting's spike frames do not span ``samples``: the
+        constructor no longer reads its first argument as sample indices.
+    """
+    import numpy as np
+
+    sorting = _provider("numpy_sorting_from_samples_and_labels")(
         samples,
         labels,
         sampling_frequency,
         unit_ids=unit_ids,
     )
+    # A renamed constructor is caught by the lookup; this catches a change
+    # in what its first argument means.
+    given = np.concatenate(
+        [
+            np.ravel(segment)
+            for segment in (
+                [samples] if isinstance(samples, np.ndarray) else samples
+            )
+        ]
+    )
+    frames = sorting.to_spike_vector()["sample_index"]
+    if given.size and (
+        frames.size == 0
+        or (frames.min(), frames.max()) != (given.min(), given.max())
+    ):
+        raise RuntimeError(
+            "NumpySorting did not keep sample indices "
+            f"{given.min()}..{given.max()} as spike frames: this "
+            "SpikeInterface reads the constructor's first argument "
+            "differently. Check spyglass.spikesorting._si_compat._PROVIDERS."
+        )
+    return sorting

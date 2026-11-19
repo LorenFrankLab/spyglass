@@ -459,6 +459,8 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - `SpikeSortingOutput.get_sort_group_info` accepts several v2 merge ids #1609
     - v1 `show_available_metrics` lists metrics the installed SpikeInterface does
         not provide as unavailable instead of failing #1609
+    - v0/v1 read paths warn once under a SpikeInterface release other than 0.99
+        or 0.104, the releases their compatibility shims are tested on #1609
     - v2 `manual_excluded_times` are absolute session timestamps. An exclusion
         that overlaps no sorted time fails preflight and raises
         `IneffectiveManualExclusionError` #1609
