@@ -372,7 +372,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     arguments #1727
 - Add `ImmutableParamsLookup` and `FactoryOnlyMaster` mixins in
     `spyglass.utils.mixins.immutable`, which block in-place edits of parameter
-    rows and direct inserts into factory-built masters #XXXX
+    rows and direct inserts into factory-built masters #1734
 
 ### Pipelines
 
