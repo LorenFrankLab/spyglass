@@ -735,6 +735,9 @@ def remove_figpack_bundles(rows: list[dict]) -> list[str]:
             continue
         with lock:
             shutil.rmtree(bundle, ignore_errors=True)
+        # On NFS the open lock file leaves a placeholder that blocks the
+        # folder's removal until the lock closes.
+        shutil.rmtree(bundle, ignore_errors=True)
         if bundle.exists():
             logger.warning(f"FigPack bundle {bundle} could not be removed.")
             continue
