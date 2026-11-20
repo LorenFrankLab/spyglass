@@ -42,6 +42,7 @@ from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.nwb_hash import (
     NwbfileHasher,
+    env_matches,
     get_file_namespaces,
     get_namespace_versions,
 )
@@ -63,34 +64,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     nwb_deps=null:blob
     """
 
-    # expected nwb_deps: core, hdmf_common, hdmf_experimental, spyglass
-    #                    ndx_franklab_novela, ndx_optogenetics, ndx_pose
-
-    _required_matches = [
-        "core",
-        "hdmf_common",
-        "hdmf_experimental",
-        "ndx_franklab_novela",
-    ]
+    # expected nwb_deps: core, hdmf-common, hdmf-experimental, spyglass
+    #                    ndx-franklab-novela, ndx-optogenetics, ndx-pose
 
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
         return sort_dict(get_namespace_versions(pynwb.get_manager().type_map))
-
-    def _dicts_match(
-        self,
-        dict_a: dict,
-        dict_b: dict,
-        required_keys: list = None,
-    ) -> bool:
-        """Check if two dicts match on required keys."""
-        if required_keys is None:
-            required_keys = self._required_matches
-        for key in required_keys:
-            if dict_a.get(key) != dict_b.get(key):
-                return False
-        return True
 
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
@@ -102,7 +82,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if self._dicts_match(self.nwb_deps, key_deps):
+            if env_matches(key_deps, self.nwb_deps):
                 restr.append(self.dict_to_pk(key))
         return self & restr
 
@@ -119,15 +99,15 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     def _has_matching_env(self, key: dict, show_err=False) -> bool:
         """Check current env for matching pynwb versions.
 
-        Compares only ``_required_matches`` namespaces, so an optional
-        extension loaded in the session but absent from the file (e.g.
-        ``ndx-pose``) does not block recompute.
+        Compares the namespaces in both the file and this session
+        (``env_matches``), so an optional extension loaded in the session
+        but absent from the file (e.g. ``ndx-pose``) does not block recompute.
         """
         if not self._has_key(key):
             return False  # # pragma: no cover
 
         need = sort_dict(self.key_env(key))
-        ret = self._dicts_match(self.nwb_deps, need)
+        ret = env_matches(need, self.nwb_deps)
 
         if not ret and show_err:
             logger.warning(  # pragma: no cover

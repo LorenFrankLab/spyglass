@@ -43,6 +43,35 @@ def get_namespace_versions(type_map: TypeMap) -> dict:
     }
 
 
+def env_matches(file_deps: Union[dict, None], env_deps: dict) -> bool:
+    """Whether a file's namespace versions are reproducible in ``env_deps``.
+
+    Compatible if every namespace in both agrees on version. Namespaces only
+    in the file are ignored, because extensions register lazily; namespaces
+    only in the environment are ignored, because the file did not use them.
+    No deps, or no shared namespace, is incompatible.
+
+    Parameters
+    ----------
+    file_deps : dict or None
+        Namespace name to version, as inventoried from the file.
+    env_deps : dict
+        Namespace name to version in this process, e.g.
+        ``get_namespace_versions(pynwb.get_manager().type_map)``.
+
+    Returns
+    -------
+    bool
+        True if the shared namespaces all agree.
+    """
+    if not file_deps:
+        return False
+    shared = set(file_deps) & set(env_deps)
+    if not shared:
+        return False
+    return all(file_deps[ns] == env_deps[ns] for ns in shared)
+
+
 DIGESTS = {"sha256": sha256, "md5": md5}
 #: What to compute when the broker cannot say which it enforces.
 UPLOAD_DIGESTS = ("sha256", "md5")
