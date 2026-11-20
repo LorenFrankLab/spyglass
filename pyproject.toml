@@ -146,13 +146,13 @@ optional-dependencies.spikesorting-v2-curation = [
   "filelock>=3.15", # shared analyzer locks and atomic draft revision checks
   "threadpoolctl>=3", # structured native-thread runtime receipts
   # review extension uses these FigPack APIs; re-test browser review to bump
-  "figpack==0.3.20",
-  "figpack-spike-sorting==0.1.14",
+  "figpack==0.4.6",
+  "figpack-spike-sorting==0.1.18",
   "ipywidgets>=8,<9", # guided notebook preview, conflict resolution, and commit
 ]
 optional-dependencies.spikesorting-v2-curation-test = [
   # browser review tests; then run ``playwright install chromium``
-  "playwright==1.55.0",
+  "playwright>=1.65",
 ]
 optional-dependencies.spikesorting-v2-validation = [
   # MEArec pulls elephant, which needs numpy>=2

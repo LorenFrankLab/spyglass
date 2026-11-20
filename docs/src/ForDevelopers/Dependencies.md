@@ -81,10 +81,10 @@ Moving the pin costs these reviews and runs:
 
 ## `spikesorting-v2-curation` extras
 
-- `figpack==0.3.20`, `figpack-spike-sorting==0.1.14`: the review extension uses
+- `figpack==0.4.6`, `figpack-spike-sorting==0.1.18`: the review extension uses
     these FigPack APIs. Rerun the browser edit, save and import journey
     (`test_review_browser_journey.py`) before changing them.
-- `playwright==1.55.0` (`spikesorting-v2-curation-test`): test only. Drives
+- `playwright>=1.65` (`spikesorting-v2-curation-test`): test only. Drives
     headless Chromium against the review bundle that `_review/delivery.py`
     serves. Run `playwright install --with-deps chromium` after installing.
 

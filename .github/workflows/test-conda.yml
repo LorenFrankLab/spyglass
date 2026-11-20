@@ -213,7 +213,7 @@ jobs:
         shard: ${{ fromJSON(github.event_name == 'workflow_dispatch'
           && '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"},{"name":"motion-benchmark"}]'
           || '[{"name":"single-session"},{"name":"integration"},{"name":"unit"},{"name":"matching"},{"name":"curation"}]') }}
-    # Playwright 1.55 cannot install Chromium on ubuntu-26.04 (ubuntu-latest).
+    # ubuntu-24.04 until a run confirms Playwright installs Chromium on 26.04.
     runs-on: ubuntu-24.04
     defaults:
       run:
