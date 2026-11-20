@@ -76,7 +76,7 @@ def _label_snapshot(
 def _profile_snapshot(ref: "ReviewProfileRef") -> dict:
     return {
         "review_profile_name": ref.review_profile_name,
-        "profile_hash": ref.profile_hash,
+        "profile_params_hash": ref.profile_params_hash,
         "evaluation_spec": {
             "metric_params_name": ref.evaluation_spec.metric_params_name,
             "auto_curation_rules_name": (
@@ -94,7 +94,7 @@ class ReviewProfileRef:
     """Resolved immutable browser-review profile."""
 
     review_profile_name: str
-    profile_hash: str
+    profile_params_hash: str
     evaluation_spec: EvaluationSpec
     displayed_unit_properties: tuple[str, ...]
     label_options: tuple[str, ...]
@@ -145,7 +145,7 @@ class ReviewProfileRef:
         row = rows[0]
         resolved = cls(
             review_profile_name=str(row["review_profile_name"]),
-            profile_hash=str(row["profile_hash"]),
+            profile_params_hash=str(row["profile_params_hash"]),
             evaluation_spec=EvaluationSpec(
                 metric_params_name=str(row["metric_params_name"]),
                 auto_curation_rules_name=str(row["auto_curation_rules_name"]),
@@ -159,7 +159,7 @@ class ReviewProfileRef:
         if isinstance(profile, cls) and resolved != profile:
             raise ValueError(
                 f"Review profile {name!r} no longer matches the pinned "
-                f"profile_hash={profile.profile_hash}."
+                f"profile_params_hash={profile.profile_params_hash}."
             )
         return resolved
 
@@ -600,7 +600,7 @@ class FigPackReview:
         _assert_figure_identity(
             uri,
             parent.as_key(),
-            expected_config_hash=str(selection["figpack_config_hash"]),
+            expected_config_hash=str(selection["figpack_params_hash"]),
         )
         profile = ReviewProfileRef.resolve(config["review_profile_name"])
         expected_profile = _profile_snapshot(profile)
@@ -1199,7 +1199,7 @@ def _load_review_edits(
 
     config_hash = (
         FigPackCurationSelection & {"figpack_curation_id": review.review_id}
-    ).fetch1("figpack_config_hash")
+    ).fetch1("figpack_params_hash")
     _assert_figure_identity(
         review.uri,
         parent_key,

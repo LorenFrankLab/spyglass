@@ -122,7 +122,7 @@ class ArtifactDetectionParameters(
     """
 
     definition = """
-    artifact_detection_params_name: varchar(64)
+    artifact_detection_params_name: varchar(200)
     ---
     artifact_detection_params: blob
     params_schema_version=2: int

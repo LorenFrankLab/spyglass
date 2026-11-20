@@ -707,7 +707,7 @@ class PreprocessingParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """
 
     definition = """
-    preprocessing_params_name: varchar(128)
+    preprocessing_params_name: varchar(200)
     ---
     preprocessing_params: blob
     params_schema_version=4: int
@@ -955,7 +955,7 @@ class Recording(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(72)
+    object_id: varchar(40)
     n_channels: int
     sampling_frequency: double
     duration_s: double

@@ -28,7 +28,7 @@ def _normalized(**changes):
 
 def test_review_profile_hash_covers_semantics():
     """Every recipe/display/import semantic, including list order, is hashed."""
-    base_hash = _normalized()["profile_hash"]
+    base_hash = _normalized()["profile_params_hash"]
     changes = (
         {"metric_params_name": "other_metrics"},
         {"auto_curation_rules_name": "other_rules"},
@@ -37,7 +37,8 @@ def test_review_profile_hash_covers_semantics():
         {"label_import_mode": "overlay"},
     )
     assert all(
-        _normalized(**change)["profile_hash"] != base_hash for change in changes
+        _normalized(**change)["profile_params_hash"] != base_hash
+        for change in changes
     )
 
 
@@ -128,7 +129,7 @@ def test_review_profile_persisted_and_immutable(dj_conn):
         assert stored["displayed_unit_properties"] == ["snr", "isi_violation"]
         assert stored["label_options"] == ["accept", "mua", "noise", "reject"]
         assert stored["label_import_mode"] == "replace"
-        assert len(stored["profile_hash"]) == 64
+        assert len(stored["profile_params_hash"]) == 64
 
         CurationReviewProfile.insert1(row, skip_duplicates=True)
         assert (

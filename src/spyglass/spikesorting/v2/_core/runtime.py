@@ -227,7 +227,9 @@ def _native_pools():
     return sorted(pools, key=lambda pool: json.dumps(pool, sort_keys=True))
 
 
-def capture_runtime_environment(*, job_kwargs=None, execution_params=None):
+def capture_runtime_environment(
+    *, job_kwargs=None, execution_params=None, accelerators=True
+):
     """Capture JSON-safe source, dependency, platform and execution metadata.
 
     ``job_kwargs`` must be the resolved settings used by computation. Environment
@@ -235,6 +237,8 @@ def capture_runtime_environment(*, job_kwargs=None, execution_params=None):
     No timestamps, hostnames, arbitrary environment variables or absolute native
     library paths enter the receipt. NumPy/SciPy BLAS settings enter identity;
     other loaded pools remain observations to allow lazy optional-library imports.
+    ``accelerators=False`` records the GPU inventory as ``"not_recorded"``, for
+    stages that run no GPU code.
     """
     for name, values in (
         ("job_kwargs", job_kwargs),
@@ -268,7 +272,11 @@ def capture_runtime_environment(*, job_kwargs=None, execution_params=None):
                 "environment": {
                     name: os.environ.get(name) for name in _DEVICE_ENV
                 },
-                "nvidia": _gpu_inventory(),
+                "nvidia": (
+                    _gpu_inventory()
+                    if accelerators
+                    else {"status": "not_recorded", "devices": []}
+                ),
             },
             "job_kwargs": dict(job_kwargs or {}),
             "execution_params": dict(execution_params or {}),
@@ -385,13 +393,13 @@ def _validate_runtime_values(snapshot):
         )
     if (
         not isinstance(nvidia["status"], str)
-        or nvidia["status"] not in {"available", "unavailable"}
+        or nvidia["status"] not in {"available", "unavailable", "not_recorded"}
         or not isinstance(nvidia["devices"], list)
     ):
         raise ValueError(
             "runtime environment accelerator inventory is invalid."
         )
-    if nvidia["status"] == "unavailable" and nvidia["devices"]:
+    if nvidia["status"] != "available" and nvidia["devices"]:
         raise ValueError(
             "Unavailable accelerator inventory cannot contain devices."
         )
@@ -490,10 +498,17 @@ def runtime_environment_fingerprint(snapshot):
         ) from exc
 
 
-def runtime_environment_provenance(*, job_kwargs=None, execution_params=None):
-    """Return a runtime receipt and its identity for current scientific outputs."""
+def runtime_environment_provenance(
+    *, job_kwargs=None, execution_params=None, accelerators=True
+):
+    """Return a runtime receipt and its identity for current scientific outputs.
+
+    Pass ``accelerators=False`` for stages that run no GPU code.
+    """
     snapshot = capture_runtime_environment(
-        job_kwargs=job_kwargs, execution_params=execution_params
+        job_kwargs=job_kwargs,
+        execution_params=execution_params,
+        accelerators=accelerators,
     )
     return {
         "runtime_environment": snapshot,

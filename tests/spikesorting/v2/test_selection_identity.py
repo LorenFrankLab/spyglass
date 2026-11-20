@@ -55,7 +55,7 @@ def test_stored_ids_outside_evaluation_are_pinned():
     )
     from spyglass.spikesorting.v2._matching.graph import input_set_hash
     from spyglass.spikesorting.v2._review.annotations import (
-        figpack_config_hash,
+        figpack_params_hash,
     )
     from tests.spikesorting.v2.test_matcher_graph_inputs import _parts
 
@@ -79,7 +79,7 @@ def test_stored_ids_outside_evaluation_are_pinned():
         )
         == "3d1f75c7f40ed547fa9e306e70df330f"
     )
-    config_hash = figpack_config_hash(
+    config_hash = figpack_params_hash(
         sorting_id=sorting_id,
         curation_id=3,
         curation_uuid=uuid.UUID(int=12),
@@ -95,11 +95,11 @@ def test_stored_ids_outside_evaluation_are_pinned():
                 {
                     "sorting_id": sorting_id,
                     "curation_id": 3,
-                    "figpack_config_hash": config_hash,
+                    "figpack_params_hash": config_hash,
                 },
             )
         )
-        == "649fa654-4ca0-55eb-8688-8e842cc3162e"
+        == "5ca07bd3-5706-5eea-abab-9f52fdcb06e7"
     )
     set_hash = input_set_hash(*_parts())
     assert (

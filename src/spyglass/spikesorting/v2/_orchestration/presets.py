@@ -624,7 +624,7 @@ def register_pipeline_preset(
     Parameters
     ----------
     name : str
-        Preset name, at most 64 characters. An existing name is accepted only
+        Preset name, at most 200 characters. An existing name is accepted only
         with identical content.
     preset : dict or _PipelinePreset
         The preset bundle.
@@ -642,7 +642,7 @@ def register_pipeline_preset(
     Raises
     ------
     PipelineInputError
-        A ``ValueError``. If ``name`` is not a non-empty string of at most 64
+        A ``ValueError``. If ``name`` is not a non-empty string of at most 200
         characters, is already used with different content, the preset fails
         Pydantic validation (the message names the field), or (when
         ``validate_rows``) a referenced parameter row is missing.
@@ -651,10 +651,10 @@ def register_pipeline_preset(
         maps to no analyzer waveform windows.
     """
     # list_pipeline_presets sorts keys, so names must be strings.
-    if not isinstance(name, str) or not name.strip() or len(name) > 64:
+    if not isinstance(name, str) or not name.strip() or len(name) > 200:
         raise PipelineInputError(
             "register_pipeline_preset: name must be a non-empty string of at "
-            f"most 64 characters, got {name!r}."
+            f"most 200 characters, got {name!r}."
         )
     content = (
         preset.model_dump() if isinstance(preset, _PipelinePreset) else preset

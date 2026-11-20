@@ -804,7 +804,7 @@ def test_make_rejects_tampered_config_hash(populated_sorting_with_curation):
     wrong_hash = "0" * 64
     identity = {
         **populated_sorting_with_curation,
-        "figpack_config_hash": wrong_hash,
+        "figpack_params_hash": wrong_hash,
     }
     figpack_id = deterministic_id("figpack_curation", identity)
     FigPackCurationSelection.insert1(
@@ -827,7 +827,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
     from spyglass.spikesorting.v2._review.annotations import (
         default_label_options,
         pack_display_config,
-        figpack_config_hash,
+        figpack_params_hash,
     )
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
@@ -842,7 +842,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
     label_options = default_label_options()
     # Hash/id computed FOR the offline+ephemeral combo, so the hash/id rechecks
     # pass and the offline-ephemeral invariant is what fires.
-    config_hash = figpack_config_hash(
+    config_hash = figpack_params_hash(
         sorting_id=populated_sorting_with_curation["sorting_id"],
         curation_id=populated_sorting_with_curation["curation_id"],
         curation_uuid=(CurationV2 & populated_sorting_with_curation).fetch1(
@@ -855,7 +855,7 @@ def test_make_rejects_offline_ephemeral_bypass(populated_sorting_with_curation):
     )
     identity = {
         **populated_sorting_with_curation,
-        "figpack_config_hash": config_hash,
+        "figpack_params_hash": config_hash,
     }
     figpack_id = deterministic_id("figpack_curation", identity)
     FigPackCurationSelection.insert1(
@@ -882,7 +882,7 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
     from spyglass.spikesorting.v2._review.annotations import (
         default_label_options,
         pack_display_config,
-        figpack_config_hash,
+        figpack_params_hash,
     )
     from spyglass.spikesorting.v2._core.selection_identity import (
         deterministic_id,
@@ -904,7 +904,7 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
         apply_merge=False,
     )
     label_options = default_label_options()
-    config_hash = figpack_config_hash(
+    config_hash = figpack_params_hash(
         sorting_id=preview["sorting_id"],
         curation_id=preview["curation_id"],
         curation_uuid=(CurationV2 & preview).fetch1("curation_uuid"),
@@ -913,7 +913,7 @@ def test_make_revalidates_preview_bypassed_selection(planted_two_unit_sort):
         upload=False,
         ephemeral=False,
     )
-    identity = {**preview, "figpack_config_hash": config_hash}
+    identity = {**preview, "figpack_params_hash": config_hash}
     figpack_id = deterministic_id("figpack_curation", identity)
     # Bypass insert_selection's guard via the documented escape hatch.
     FigPackCurationSelection.insert1(

@@ -40,7 +40,7 @@ from spyglass.spikesorting.v2._curation.transforms import ManualMergeAction
 from spyglass.spikesorting.v2._review.annotations import (
     curation_annotations_to_labels_and_merges,
     default_label_options,
-    figpack_config_hash,
+    figpack_params_hash,
     labels_and_merges_to_annotations,
     normalize_displayed_unit_properties,
     pack_display_config,
@@ -279,7 +279,7 @@ def _assert_figure_identity(
     parent_curation_key : dict
         ``sorting_id`` and ``curation_id`` of the curation the figure shows.
     expected_config_hash : str, optional
-        The selection's ``figpack_config_hash`` when it is already known.
+        The selection's ``figpack_params_hash`` when it is already known.
 
     Returns
     -------
@@ -323,7 +323,7 @@ def _assert_figure_identity(
     selection_key = {"figpack_curation_id": matches[0]}
     selection = (FigPackCurationSelection & selection_key).fetch1()
     if expected_config_hash is not None and str(
-        selection["figpack_config_hash"]
+        selection["figpack_params_hash"]
     ) != str(expected_config_hash):
         raise FigPackIdentityError(
             f"The FigPack figure at {uri} has a different configuration than "
@@ -389,7 +389,7 @@ def _assert_figpack_curatable(curation_key: dict) -> None:
 def _assert_selection_identity(selection: dict, key: dict) -> None:
     """Recheck the content-addressed identity at consume time (bypass guard).
 
-    Recomputes ``figpack_config_hash`` and ``figpack_curation_id`` from the
+    Recomputes ``figpack_params_hash`` and ``figpack_curation_id`` from the
     row and raises ``SchemaBypassError`` on mismatch.
     """
     # insert_selection sets ephemeral=False when offline.
@@ -411,7 +411,7 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
             f"{selection.get('displayed_unit_properties')!r} (a raw-insert "
             "bypass). Drop the row and re-insert via insert_selection()."
         ) from exc
-    expected_hash = figpack_config_hash(
+    expected_hash = figpack_params_hash(
         sorting_id=selection["sorting_id"],
         curation_id=selection["curation_id"],
         curation_uuid=(
@@ -427,10 +427,10 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
         ephemeral=bool(selection["ephemeral"]),
         review_config=review_config,
     )
-    if selection["figpack_config_hash"] != expected_hash:
+    if selection["figpack_params_hash"] != expected_hash:
         raise SchemaBypassError(
             f"FigPackCurationSelection {key['figpack_curation_id']} has a "
-            "figpack_config_hash that does not match its own label_options / "
+            "figpack_params_hash that does not match its own label_options / "
             "displayed_unit_properties / upload / ephemeral (a raw-insert "
             "bypass). Drop the row and re-insert via insert_selection()."
         )
@@ -439,7 +439,7 @@ def _assert_selection_identity(selection: dict, key: dict) -> None:
         {
             "sorting_id": selection["sorting_id"],
             "curation_id": selection["curation_id"],
-            "figpack_config_hash": expected_hash,
+            "figpack_params_hash": expected_hash,
         },
     )
     if uuid.UUID(str(key["figpack_curation_id"])) != expected_id:
@@ -783,7 +783,7 @@ class FigPackCurationSelection(
     figpack_curation_id: uuid
     ---
     -> CurationV2
-    figpack_config_hash: char(64)  # sha256 over FigPack UI config
+    figpack_params_hash: char(64)  # sha256 over FigPack UI config
     label_options: blob            # curation label palette, in display order
     displayed_unit_properties=null: blob # display columns + optional immutable review snapshot
     upload: bool                   # True publishes a hosted figpack.org URI
@@ -866,7 +866,7 @@ class FigPackCurationSelection(
             displayed_unit_properties
         )
         curation_uuid = (CurationV2 & parent_key).fetch1("curation_uuid")
-        config_hash = figpack_config_hash(
+        config_hash = figpack_params_hash(
             sorting_id=parent_key["sorting_id"],
             curation_id=parent_key["curation_id"],
             curation_uuid=curation_uuid,
@@ -876,7 +876,7 @@ class FigPackCurationSelection(
             ephemeral=ephemeral,
             review_config=review_config,
         )
-        identity = {**parent_key, "figpack_config_hash": config_hash}
+        identity = {**parent_key, "figpack_params_hash": config_hash}
         deterministic_figpack_id = deterministic_id(
             "figpack_curation", identity
         )

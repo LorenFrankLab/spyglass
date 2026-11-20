@@ -275,7 +275,7 @@ class AnalyzerVersionsComputed(NamedTuple):
     si_deps: dict
     analyzer_manifest: dict
     status: str
-    analyzer_hash: Optional[str]
+    analyzer_content_hash: Optional[str]
 
 
 def _recompute_compute(
@@ -925,7 +925,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
     si_deps=null: blob          # spikeinterface version, etc.
     analyzer_manifest=null: blob # extension_content_hashes + base_extension_seed_modes
     status: enum('ok', 'zero_units', 'missing_folder') # missing_folder: absent or unloadable
-    analyzer_hash=null: char(64) # combined extension content hash; NULL unless status='ok'
+    analyzer_content_hash=null: char(64) # combined extension content hash; NULL unless status='ok'
     """
 
     @property
@@ -985,7 +985,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 si_deps=si_deps,
                 analyzer_manifest={},
                 status="zero_units",
-                analyzer_hash=None,
+                analyzer_content_hash=None,
             )
         try:
             analyzer = load_analyzer_folder_no_rebuild(
@@ -993,7 +993,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 recipe_label=key["waveform_params_name"],
                 sorting_id=key["sorting_id"],
             )
-            # Seed modes are provenance only; content hashes set analyzer_hash.
+            # Seed modes are provenance only; content hashes set analyzer_content_hash.
             content_hashes = hash_extension_data(analyzer)
             manifest = {
                 "extension_content_hash_version": ANALYZER_CONTENT_HASH_VERSION,
@@ -1015,17 +1015,17 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 si_deps=si_deps,
                 analyzer_manifest={},
                 status="missing_folder",
-                analyzer_hash=None,
+                analyzer_content_hash=None,
             )
         return AnalyzerVersionsComputed(
             si_deps=si_deps,
             analyzer_manifest=manifest,
             status="ok",
-            analyzer_hash=combined_hash(content_hashes),
+            analyzer_content_hash=combined_hash(content_hashes),
         )
 
     def make_insert(
-        self, key, si_deps, analyzer_manifest, status, analyzer_hash
+        self, key, si_deps, analyzer_manifest, status, analyzer_content_hash
     ):
         """Insert the analyzer inventory row."""
         self.insert1(
@@ -1034,7 +1034,7 @@ class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
                 "si_deps": si_deps,
                 "analyzer_manifest": analyzer_manifest,
                 "status": status,
-                "analyzer_hash": analyzer_hash,
+                "analyzer_content_hash": analyzer_content_hash,
             }
         )
 

@@ -242,7 +242,7 @@ class QualityMetricParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """
 
     definition = """
-    metric_params_name: varchar(64)
+    metric_params_name: varchar(200)
     ---
     metric_names: blob              # list[str] of SpikeInterface metric names
     metric_kwargs: blob             # dict[str, dict] per-metric kwargs
@@ -363,7 +363,7 @@ class AutoCurationRules(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """
 
     definition = """
-    auto_curation_rules_name: varchar(64)
+    auto_curation_rules_name: varchar(200)
     ---
     auto_merge_preset: varchar(32)   # an SI compute_merge_unit_groups preset, or 'none'
     auto_merge_kwargs: blob
@@ -705,9 +705,9 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     -> CurationEvaluationSelection
     ---
     -> AnalysisNwbfile
-    metrics_object_id: varchar(72)
-    merge_suggestions_object_id: varchar(72)
-    proposed_labels_object_id: varchar(72)
+    metrics_object_id: varchar(40)
+    merge_suggestions_object_id: varchar(40)
+    proposed_labels_object_id: varchar(40)
     spikeinterface_version: varchar(32)  # spikeinterface.__version__ at eval time
     source_analyzer_hashes=null: blob    # role -> content_hash of each canonical analyzer consumed (fast path); NULL for merged-curation temp analyzers
     """
@@ -1249,6 +1249,7 @@ class CurationEvaluation(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                             "stage": "curation_evaluation",
                             "analyzer_job_kwargs": analyzer_inputs.analyzer_job_kwargs,
                         },
+                        accelerators=False,
                     ),
                 },
             )

@@ -20,9 +20,14 @@ How `spyglass.spikesorting.v2` is organized, and why.
 - A helper a public module imports for its own use is not API unless listed
     here. Neither are the `*Fetched` / `*Computed` classes, which carry data
     between a table's `make_fetch`, `make_compute`, and `make_insert`.
-- `pipeline` declares a literal `__all__`, which the API reference renders. The
-    package root's literal `__all__` is the subset it re-exports. Every root
-    name except `CurationLabel` loads lazily from `pipeline`, so
+- `pipeline` declares a literal `__all__`, which the API reference renders:
+    the entry points, the handles they return (`RunResult`, `CurationRef`,
+    `EvaluationResult`, `ReviewProfileRef`, `FigPackReview`) and
+    `V2_UNIT_SELECTION_POLICIES`. Input, report and summary types (`RunV2*`,
+    `*Report`, `UnitMatchPlan`, ...) are importable from `pipeline` for type
+    annotations but are not in `__all__`. The package root's literal
+    `__all__` is the subset it re-exports. Every root name except
+    `CurationLabel` loads lazily from `pipeline`, so
     `import spyglass.spikesorting.v2` stays light.
 - Most work needs only the package root, `pipeline`, and the curation and review
     handles. Use the tables to query results or compose a stage by hand.
@@ -290,6 +295,48 @@ Both curation paths:
     surface. The concat `CurationV2` itself is not registered: its synthetic
     timeline is unsafe for session-scoped consumers.
 
+## Identity model
+
+Most Spyglass selections are keyed by a `uuid4` or a name, and the code that
+inserts them checks for duplicates. v2 derives each key from the row's inputs,
+so the same inputs always give the same row, and it refuses writes that would
+break that.
+
+- **Derived keys.** A selection's primary key is
+    `spyglass.utils.identity.deterministic_id`: a `uuid5` over the selection's
+    full logical identity (source, parameter names, artifact choice, recipe
+    versions). `insert_selection` computes it, so inserting the same inputs
+    again returns the same key. A unique index cannot do this job: the source
+    columns are nullable, MySQL lets NULLs repeat in a unique index, and some
+    identities are sets (concat members, UnitMatch inputs), not columns.
+- **Insert guards.** `SelectionMasterInsertGuard` refuses a direct `insert`
+    into a derived-key selection; `insert_selection` passes
+    `allow_direct_insert=True` itself. `FactoryOnlyMaster` does the same for
+    masters that one factory writes together with their parts (`CurationV2`,
+    `SessionGroup`, `SharedArtifactGroup`). Both refuse `update1`, because an
+    identity column edited in place silently retargets the rows that reference
+    it. Readers that re-derive an id from a stored row (`resolve_source`) raise
+    `SchemaBypassError` when it does not match.
+- **Parameter rows.** `ImmutableParamsLookup` refuses `update1` and
+    `insert(replace=True)`. Most downstream ids include a parameter row's
+    name, not its content, so new content under an old name would change what
+    existing ids mean. A changed recipe is a new named row.
+- **Escape hatches.** `allow_direct_insert`, `allow_master_mutation` and
+    `allow_param_mutation` are for maintenance and tests on rows with no live
+    references.
+- **Curation numbers.** `CurationV2` rows carry a database-unique
+    `curation_uuid`, which handles (`CurationRef`) check on every use. A
+    `curation_id` is not given twice while its sort selection exists
+    (`CurationIdCounter`), because the `SpikeSortingOutput` merge id hashes
+    `(sorting_id, curation_id)`: a reused number would give a new curation the
+    merge id of a deleted one, and a merge id cited outside the database would
+    then name different spikes.
+- **Hashes.** v2 hashes with SHA-256 (`hashlib.sha256`), stored as `char(64)`
+    hex, and its ids are `uuid5`. Column names say what is hashed:
+    `*_content_hash` for produced data (traces, analyzer extensions),
+    `*_params_hash` for configuration, `*_set_hash` for a frozen member set,
+    and `*_input_hash` for the inputs a `make_fetch` checks again.
+
 ## Internal domains
 
 Public modules own notebook entry points, handles, and DataJoint table
@@ -426,7 +473,10 @@ structured runtime receipts from `_core.runtime`: the checkout's git commit and
 whether its tracked source had uncommitted edits (`git_dirty`), Python and
 dependency versions, platform and accelerator metadata,
 thread configuration, native BLAS settings and resolved execution settings.
-Receipts describe the host orchestrator. Requested container settings and the
+The NVIDIA device inventory is recorded on sorting and matching receipts,
+where a GPU can run; GPU sorts are not bit-reproducible, so it explains a
+rerun that differs. Curation, member-export and evaluation receipts record it
+as `not_recorded`. Receipts describe the host orchestrator. Requested container settings and the
 sorter adapter's observed producer versions remain distinct metadata; the host
 receipt does not claim to describe software inside a container.
 
@@ -763,7 +813,14 @@ difference.
     `get_channel_locations`, whose fields can shift across SpikeInterface
     versions.
 - Lineage (`source_object_id`) is not hashed. Every comparison is within one
-    `recording_id`, and `content_hash` is never a key.
+    `recording_id`. `content_hash` is not part of `Recording`'s key, but two
+    downstream ids include it: the motion estimate id (through
+    `MotionEstimateSelection.source_content_hash`) and the UnitMatch
+    `input_set_hash` (each input's `recording_content_hash`), so traces that
+    hash differently give those rows new ids.
+- The fingerprint is computed when the file is written, because it is the only
+    reference a byte-different rebuild can be checked against. On a 20 min,
+    30 kHz recording it took 31 s (measured 2026-10-27).
 - Values are rounded before hashing (`TRACE_ROUNDING`, `TIMESTAMP_ROUNDING`). A
     false match is the dangerous direction and is negligible at this precision;
     a false mismatch only skips reclamation.
@@ -1168,7 +1225,7 @@ Nothing is written unless a run passes `motion_mode="estimate"` or `"apply"`.
     attempts put the reason in `err_msg`.
 - `SortingAnalyzerVersions.status` says whether a folder was hashed: `ok`,
     `zero_units` (no analyzer can exist) or `missing_folder` (absent or
-    unloadable, inventoried without a rebuild). `analyzer_hash` is NULL unless
+    unloadable, inventoried without a rebuild). `analyzer_content_hash` is NULL unless
     `status` is `ok`.
 - A rebuild retires the prior `SortingAnalyzerVersions` generation and its
     verdicts with `delete_quick`

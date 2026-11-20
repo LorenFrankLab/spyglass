@@ -36,7 +36,7 @@ class PipelinePreset(SpyglassMixin, dj.Manual):
     """
 
     definition = """
-    pipeline_preset: varchar(64)
+    pipeline_preset: varchar(200)
     ---
     -> PreprocessingParameters
     -> SorterParameters

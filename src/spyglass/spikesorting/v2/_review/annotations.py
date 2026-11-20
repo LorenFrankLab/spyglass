@@ -39,7 +39,7 @@ def default_label_options() -> list[str]:
     ]
 
 
-def figpack_config_hash(
+def figpack_params_hash(
     *,
     sorting_id,
     curation_id,

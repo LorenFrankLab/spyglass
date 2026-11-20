@@ -1140,11 +1140,11 @@ def test_artifact_path_reverified_outside_transactions_reused_inside(
 _PINNED_RECORDINGS = {
     "chronic_minirec_a_.nwb": (
         "02a9f450-ff62-5ca3-a184-1dd0554cfa42",
-        "69d15b4909ad3545f5d761417e9ff947d7c45238b63b29cdd40020b2602494c0",
+        "b07d39955b5e4f9e20f532b23b9c9349f76799b202563a5abff2d5d762dbbc07",
     ),
     "chronic_minirec_b_.nwb": (
         "500e5fd7-cba1-5a77-8146-66701a427228",
-        "2a3d01d932caa0b5eb1ed3708ed11d8e0daf6d6963e43318cda1c8f071278fe6",
+        "57eacdf9876f46958d685e3a340cbe1d375b67be780ce0f0b09754da898ad482",
     ),
 }
 _PINNED_INPUT_HASH = (
@@ -1152,7 +1152,7 @@ _PINNED_INPUT_HASH = (
 )
 _PINNED_CONCAT = (
     "5bb4d9d1-9c27-57c1-be4b-a4f5bff479f9",
-    "ed8d2cb8ed28d65dd27ec2336e5202ac3831a4cf56b0bf4215a7b7308410491d",
+    "e681c59098cfc85d41c71d961f0899df43f158470ed4b0da5e1b840b263ecdde",
 )
 
 

@@ -377,7 +377,7 @@ def test_estimate_round_trip(drift_recording):
     assert row["n_temporal_bins"] == motion.displacement[0].shape[0]
     # A +/-25 um drift was planted; the estimate must see it.
     assert row["max_abs_displacement_um"] > 10.0
-    assert row["input_fingerprint"] == _motion.motion_input_fingerprint(
+    assert row["motion_input_hash"] == _motion.motion_input_hash(
         source_content_hash=(MotionEstimateSelection & key).fetch1(
             "source_content_hash"
         ),

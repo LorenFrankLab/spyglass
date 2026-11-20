@@ -157,7 +157,7 @@ def hash_recording_traces(recording, *, rounding: int = 4) -> dict[str, str]:
     """
     hashes: dict[str, str] = {}
     for segment in range(recording.get_num_segments()):
-        digest = hashlib.md5()
+        digest = hashlib.sha256()
         n_frames = recording.get_num_frames(segment_index=segment)
         for start in range(0, n_frames, 300_000):
             end = min(start + 300_000, n_frames)

@@ -13,7 +13,8 @@ BadChannelLabel = Literal["good", "dead", "noise", "out"]
 class CurationSource(str, Enum):
     """Provenance of how a ``CurationV2`` row was created.
 
-    Matches the enum on the table's ``curation_source`` column.
+    The ``curation_source`` column is ``varchar(32)``, so a new source is a
+    code change, not a table change. ``insert_curation`` checks this set.
     """
 
     manual = "manual"

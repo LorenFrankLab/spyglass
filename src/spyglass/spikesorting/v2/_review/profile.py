@@ -29,7 +29,7 @@ _PROFILE_FIELDS = frozenset(
         "displayed_unit_properties",
         "label_options",
         "label_import_mode",
-        "profile_hash",
+        "profile_params_hash",
     }
 )
 
@@ -122,18 +122,18 @@ def normalize_review_profile(
     name = str(row["review_profile_name"])
     metric_name = str(row["metric_params_name"])
     rules_name = str(row["auto_curation_rules_name"])
-    if not name or len(name) > 64:
+    if not name or len(name) > 200:
         raise ValueError(
-            "review_profile_name must be a non-empty string of at most 64 "
+            "review_profile_name must be a non-empty string of at most 200 "
             "characters."
         )
     for field, value in (
         ("metric_params_name", metric_name),
         ("auto_curation_rules_name", rules_name),
     ):
-        if not value or len(value) > 64:
+        if not value or len(value) > 200:
             raise ValueError(
-                f"{field} must be a non-empty string of at most 64 characters."
+                f"{field} must be a non-empty string of at most 200 characters."
             )
 
     displayed = normalize_displayed_unit_properties(
@@ -168,17 +168,17 @@ def normalize_review_profile(
         "label_options": label_options,
         "label_import_mode": label_import_mode,
     }
-    profile_hash = sha256_json(semantic, allow_nan=False)
-    supplied_hash = row.get("profile_hash")
-    if supplied_hash is not None and str(supplied_hash) != profile_hash:
+    profile_params_hash = sha256_json(semantic, allow_nan=False)
+    supplied_hash = row.get("profile_params_hash")
+    if supplied_hash is not None and str(supplied_hash) != profile_params_hash:
         raise ValueError(
-            "CurationReviewProfile profile_hash does not match its normalized "
-            f"semantic content (expected {profile_hash})."
+            "CurationReviewProfile profile_params_hash does not match its normalized "
+            f"semantic content (expected {profile_params_hash})."
         )
     return {
         "review_profile_name": name,
         **semantic,
-        "profile_hash": profile_hash,
+        "profile_params_hash": profile_params_hash,
     }
 
 

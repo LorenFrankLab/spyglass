@@ -13,7 +13,7 @@ from spyglass.spikesorting.v2._review.annotations import (
     annotations_payload_hash,
     curation_annotations_to_labels_and_merges,
     default_label_options,
-    figpack_config_hash,
+    figpack_params_hash,
     labels_and_merges_to_annotations,
     normalize_displayed_unit_properties,
     pack_display_config,
@@ -42,7 +42,7 @@ def _hash(**overrides):
         ephemeral=False,
     )
     base.update(overrides)
-    return figpack_config_hash(**base)
+    return figpack_params_hash(**base)
 
 
 def test_default_label_options_is_curation_order():
@@ -71,15 +71,15 @@ def test_config_hash_sensitive_to_every_field():
     assert _hash(upload=True) != base
     assert _hash(ephemeral=True) != base
     assert _hash(sorting_id="99999999-2222-3333-4444-555555555555") != base
-    assert _hash(review_config={"profile_hash": "a"}) != base
-    assert _hash(review_config={"profile_hash": "b"}) != _hash(
-        review_config={"profile_hash": "a"}
+    assert _hash(review_config={"profile_params_hash": "a"}) != base
+    assert _hash(review_config={"profile_params_hash": "b"}) != _hash(
+        review_config={"profile_params_hash": "a"}
     )
 
 
 def test_config_hash_requires_a_curation_generation():
     with pytest.raises(TypeError, match="curation_uuid"):
-        figpack_config_hash(
+        figpack_params_hash(
             sorting_id=_SORTING_ID,
             curation_id=0,
             label_options=[],
@@ -101,12 +101,12 @@ def test_expert_config_uses_the_current_display_mapping(properties):
 def test_guided_config_uses_the_current_display_mapping():
     """Review snapshots use the same shape and preserve their JSON content."""
     packed = pack_display_config(
-        ["snr"], {"profile_hash": "abc", "spec": ("minimal", "none")}
+        ["snr"], {"profile_params_hash": "abc", "spec": ("minimal", "none")}
     )
     properties, review = unpack_display_config(packed)
     assert properties == ["snr"]
     assert review == {
-        "profile_hash": "abc",
+        "profile_params_hash": "abc",
         "spec": ["minimal", "none"],
     }
 

@@ -6,7 +6,7 @@ Tables:
 
 ``curation_source`` values written by v2: ``manual``, ``figpack``, and
 ``curation_evaluation`` (a child accepted from a ``CurationEvaluation``).
-``analyzer_curation`` is a valid enum value that no v2 workflow writes.
+``analyzer_curation`` is a valid value that no v2 workflow writes.
 External NWB Units stay in ``ImportedSpikeSorting``.
 """
 
@@ -165,9 +165,9 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
     curation_uuid: uuid
     parent_curation_id=-1: int
     -> AnalysisNwbfile
-    object_id: varchar(72)
+    object_id: varchar(40)
     merges_applied=0: bool
-    curation_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'curation_evaluation')
+    curation_source = 'manual': varchar(32)  # a CurationSource value, checked on insert
     description: varchar(255)
     created_at=CURRENT_TIMESTAMP: timestamp
     created_by='': varchar(128)
@@ -177,8 +177,9 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
     class Unit(SpyglassMixinPart):
         """Per-curated-unit peak channel.
 
-        A merged unit inherits the peak channel of its highest-amplitude
-        contributor.
+        A merged unit inherits the peak channel and peak amplitude of its
+        highest-amplitude contributor; ``n_spikes`` is its stored train length.
+        ``CurationEvaluation`` scores the merged template itself.
         """
 
         definition = """
@@ -186,7 +187,7 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         unit_id: int
         ---
         -> Electrode
-        peak_amplitude_uv: float    # peak template amplitude in microvolts
+        peak_amplitude_uv: float    # peak template amplitude (uV); a merged unit's is its largest contributor's
         n_spikes: int
         """
 
@@ -701,7 +702,8 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
                         description=description,
                     ),
                     **runtime_environment_provenance(
-                        execution_params={"stage": "curation"}
+                        execution_params={"stage": "curation"},
+                        accelerators=False,
                     ),
                 },
             )

@@ -38,27 +38,29 @@ _ROOT_REEXPORTS = frozenset(
         "plot_sort_group_geometry",
         "RunResult",
         "CurationRef",
-        "EvaluationSpec",
         "EvaluationResult",
-        "MergeEvaluateReceipt",
         "ReviewProfileRef",
         "describe_review_profiles",
         "FigPackReview",
+        "open_curation_analyzer",
+        "select_units_for_analysis",
+        "resolve_unit_selection",
+        "V2_UNIT_SELECTION_POLICIES",
+    ]
+)
+# Types callers read but do not name: importable from ``pipeline``, not in
+# ``__all__``.
+_FACADE_TYPES = frozenset(
+    [
+        "EvaluationSpec",
+        "MergeEvaluateReceipt",
         "CurationChangeSet",
         "MergeLabelConflict",
         "ReviewImportReceipt",
         "ReviewStageStatus",
-        "open_curation_analyzer",
-        "select_units_for_analysis",
-        "resolve_unit_selection",
         "UnitSelectionSnapshot",
         "UnitSelectionReceipt",
         "SelectedGroup",
-        "V2_UNIT_SELECTION_POLICIES",
-    ]
-)
-_FACADE_REEXPORTS = _ROOT_REEXPORTS | frozenset(
-    [
         "PreflightCheck",
         "PreflightReport",
         "PreflightSessionReport",
@@ -98,9 +100,19 @@ def test_pipeline_facade_reexports_public_api():
     import spyglass.spikesorting.v2.pipeline as pl
 
     assert len(pl.__all__) == len(set(pl.__all__))
-    assert _FACADE_REEXPORTS <= set(pl.__all__)
+    assert _ROOT_REEXPORTS <= set(pl.__all__)
     missing = [name for name in pl.__all__ if not hasattr(pl, name)]
     assert not missing, f"pipeline facade no longer exports: {missing}"
+
+
+def test_pipeline_types_are_importable_but_not_in_all():
+    """Input, report and summary types import from ``pipeline`` for type
+    annotations, and stay out of ``__all__`` and the API reference."""
+    import spyglass.spikesorting.v2.pipeline as pl
+
+    missing = [name for name in _FACADE_TYPES if not hasattr(pl, name)]
+    assert not missing, f"pipeline no longer imports: {missing}"
+    assert not _FACADE_TYPES & set(pl.__all__)
 
 
 def test_package_root_reexports_primary_entrypoints():

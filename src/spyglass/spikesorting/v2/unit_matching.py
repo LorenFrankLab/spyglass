@@ -164,7 +164,7 @@ class MatcherParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     """A named, registry-validated cross-session matcher configuration."""
 
     definition = """
-    matcher_params_name: varchar(64)
+    matcher_params_name: varchar(200)
     ---
     matcher: varchar(32)         # registered matcher backend (e.g. 'unitmatch')
     matcher_params: blob         # validated against the per-matcher Pydantic model
@@ -741,7 +741,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
     -> UnitMatchSelection
     ---
     -> AnalysisNwbfile           # parent = the first input's first recording's NWB
-    pairs_object_id: varchar(72)
+    pairs_object_id: varchar(40)
     n_pairs: int
     matcher_runtime_s: float
     spikeinterface_version: varchar(32)     # spikeinterface.__version__ at match time

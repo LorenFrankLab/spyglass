@@ -675,11 +675,11 @@ def test_sorting_analyzer_recompute_matches(populated_sorting, clean_recompute):
     )
 
     SortingAnalyzerVersions.populate(populated_sorting, reserve_jobs=False)
-    status, analyzer_hash = (
+    status, analyzer_content_hash = (
         SortingAnalyzerVersions & populated_sorting
-    ).fetch1("status", "analyzer_hash")
+    ).fetch1("status", "analyzer_content_hash")
     assert status == "ok"
-    assert analyzer_hash
+    assert analyzer_content_hash
     SortingAnalyzerRecomputeSelection.attempt_all(populated_sorting)
     SortingAnalyzerRecompute.populate(populated_sorting, reserve_jobs=False)
     assert SortingAnalyzerRecompute & populated_sorting & "matched=1"
@@ -793,7 +793,7 @@ def test_analyzer_manifest_records_noise_levels_seed(
     - random_spikes and noise_levels record a seed; templates and waveforms are
       "unseeded".
     - noise_levels is in the recompute content set.
-    - analyzer_hash derives from extension content hashes only.
+    - analyzer_content_hash derives from extension content hashes only.
     """
     from spyglass.spikesorting.v2._storage.recompute import combined_hash
     from spyglass.spikesorting.v2.recompute import SortingAnalyzerVersions
@@ -808,9 +808,9 @@ def test_analyzer_manifest_records_noise_levels_seed(
     assert len(manifest["storage_fingerprint"]) == 64
     # noise_levels is in the recompute content set.
     assert "noise_levels" in manifest["extension_content_hashes"]
-    # analyzer_hash combines the extension content hashes only.
+    # analyzer_content_hash combines the extension content hashes only.
     assert row["status"] == "ok"
-    assert row["analyzer_hash"] == combined_hash(
+    assert row["analyzer_content_hash"] == combined_hash(
         manifest["extension_content_hashes"]
     )
 
@@ -851,9 +851,9 @@ def test_sorting_analyzer_versions_fetch_pins_folder_and_compute_needs_no_db(
 
     SortingAnalyzerVersions.populate(key, reserve_jobs=False)
     row = (SortingAnalyzerVersions & key).fetch1()
-    assert (computed.status, computed.analyzer_hash) == (
+    assert (computed.status, computed.analyzer_content_hash) == (
         row["status"],
-        row["analyzer_hash"],
+        row["analyzer_content_hash"],
     )
     assert (
         computed.analyzer_manifest["extension_content_hashes"]
@@ -877,21 +877,25 @@ def test_sorting_analyzer_versions_compute_zero_unit_and_missing(
     with forbid_db_queries(monkeypatch, "SortingAnalyzerVersions"):
         zero = table.make_compute(key, 0, absent)
         missing = table.make_compute(key, 3, absent)
-    assert (zero.status, zero.analyzer_hash, zero.analyzer_manifest) == (
+    assert (
+        zero.status,
+        zero.analyzer_content_hash,
+        zero.analyzer_manifest,
+    ) == (
         "zero_units",
         None,
         {},
     )
     assert (
         missing.status,
-        missing.analyzer_hash,
+        missing.analyzer_content_hash,
         missing.analyzer_manifest,
     ) == ("missing_folder", None, {})
 
 
 @pytest.mark.usefixtures("dj_conn")
 def test_sorting_analyzer_versions_hash_is_pinned(monkeypatch):
-    """A loaded analyzer's ``analyzer_hash`` keeps its stored value for the
+    """A loaded analyzer's ``analyzer_content_hash`` keeps its stored value for the
     same extension content hashes (pinned on the base commit)."""
     from spyglass.spikesorting.v2 import recompute
     from spyglass.spikesorting.v2._sorting import analyzer as analyzer_mod
@@ -914,7 +918,7 @@ def test_sorting_analyzer_versions_hash_is_pinned(monkeypatch):
         key, 3, "/unused.analyzer"
     )
     assert computed.status == "ok"
-    assert computed.analyzer_hash == (
+    assert computed.analyzer_content_hash == (
         "2e07ed1f6fc88ccead7e4bd54f08283cb47db08de9b24a6d5d6f6de1c8df995c"
     )
 
@@ -979,7 +983,7 @@ def test_sorting_analyzer_versions_records_missing_without_rebuild(
         SortingAnalyzerVersions & sort_key & {"waveform_params_name": recipe}
     ).fetch1()
     assert row["status"] == "missing_folder"
-    assert row["analyzer_hash"] is None
+    assert row["analyzer_content_hash"] is None
     assert not row["analyzer_manifest"]  # {} / None: no hashed content
     assert not folder.exists()  # the inventory did NOT rebuild
 

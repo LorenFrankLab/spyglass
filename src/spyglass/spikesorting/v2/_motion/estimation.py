@@ -1898,7 +1898,7 @@ def motion_corrected_selection_identity(
     return MotionSelectionIdentity(selection_id, master_row)
 
 
-def motion_input_fingerprint(
+def motion_input_hash(
     *,
     source_content_hash: str,
     artifact_detection_id,

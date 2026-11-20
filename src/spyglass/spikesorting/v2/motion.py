@@ -117,7 +117,7 @@ class MotionEstimationParameters(
     """
 
     definition = """
-    motion_estimation_params_name: varchar(64)
+    motion_estimation_params_name: varchar(200)
     ---
     motion_estimation_params: blob
     params_schema_version=1: int
@@ -184,7 +184,7 @@ class MotionInterpolationParameters(
     """
 
     definition = """
-    motion_interpolation_params_name: varchar(64)
+    motion_interpolation_params_name: varchar(200)
     ---
     motion_interpolation_params: blob
     params_schema_version=1: int
@@ -227,7 +227,7 @@ class MotionCorrectionParameters(
     """
 
     definition = """
-    motion_correction_params_name: varchar(64)
+    motion_correction_params_name: varchar(200)
     ---
     -> MotionEstimationParameters
     -> MotionInterpolationParameters
@@ -520,7 +520,7 @@ class MotionEstimateComputed(NamedTuple):
     peaks_per_temporal_bin: np.ndarray
     peaks_per_continuity_span: np.ndarray
     noise_levels: np.ndarray
-    input_fingerprint: str
+    motion_input_hash: str
 
 
 #: ``EstimationClock`` field -> the ``MotionEstimate`` column that stores it.
@@ -559,6 +559,15 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     gap between spans is kept up to the recipe's ``max_gap_s``.
     :meth:`get_estimation_clock` returns the time map and
     :meth:`get_displacement_on_source_clock` maps bins back to source time.
+
+    The scalar columns (``max_abs_displacement_um``, ``n_temporal_bins``,
+    ``n_peaks_*``) are the queryable summary. The blobs are results:
+    correction, rebuild and :meth:`get_motion` read ``motion``, the spans and
+    the channel arrays; ``peaks_per_temporal_bin``,
+    ``peaks_per_continuity_span`` and ``noise_levels`` are diagnostics for
+    judging the estimate. ``motion`` dominates the row size, at up to 8 bytes
+    per temporal bin per spatial window: with the DREDge presets (1 s bins,
+    400 um windows) an hour on a 384-channel probe is at most about 0.3 MB.
 
     Populated explicitly. If the recipe's resolution, SpikeInterface version
     or algorithm version changed since selection, populate raises; recreate
@@ -599,7 +608,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
     peaks_per_temporal_bin: longblob  # (n_temporal_bins,) int64 kept peaks per temporal bin
     peaks_per_continuity_span: longblob  # (n_spans,) int64 kept peaks per continuity span; 0 marks a span with no evidence
     noise_levels: longblob            # (n_channels,) float64 detection noise in microvolts
-    input_fingerprint: char(64)       # SHA-256 of source content, spans, channels and configuration
+    motion_input_hash: char(64)       # SHA-256 of source content, spans, channels and configuration
     """
 
     _parallel_make = True
@@ -803,7 +812,7 @@ class MotionEstimate(SpyglassMixin, dj.Computed):
             peaks_per_temporal_bin=diagnostics.peaks_per_temporal_bin,
             peaks_per_continuity_span=diagnostics.peaks_per_continuity_span,
             noise_levels=diagnostics.noise_levels,
-            input_fingerprint=_motion.motion_input_fingerprint(
+            motion_input_hash=_motion.motion_input_hash(
                 source_content_hash=source_content_hash,
                 artifact_detection_id=artifact_detection_id,
                 n_samples=n_samples,
@@ -1225,7 +1234,7 @@ class MotionCorrectedRecording(
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(72)
+    object_id: varchar(40)
     content_hash: char(64)             # content fingerprint of the corrected traces, timestamps, geometry and scaling
     source_content_hash: char(64)      # content_hash of the source trace artifact the estimate was computed from
     n_samples: bigint                  # frames; equal to the source's

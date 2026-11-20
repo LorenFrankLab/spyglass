@@ -17,7 +17,10 @@ Re-running with the same inputs inserts nothing and returns the same summary
 (same ``root_merge_id``).
 
 This module re-exports the public names from ``_orchestration`` so user code
-imports from one path.
+imports from one path. ``__all__`` lists the entry points and the handles
+they return. The input, report and summary types (``RunV2*``, ``*Report``,
+``UnitMatchPlan``, ...) are importable here for annotations but are not
+in ``__all__``: callers read their fields without naming them.
 """
 
 from __future__ import annotations
@@ -162,54 +165,12 @@ __all__ = [
     "plot_sort_group_geometry",
     "RunResult",
     "CurationRef",
-    "EvaluationSpec",
     "EvaluationResult",
-    "MergeEvaluateReceipt",
     "ReviewProfileRef",
     "describe_review_profiles",
     "FigPackReview",
-    "CurationChangeSet",
-    "MergeLabelConflict",
-    "ReviewImportReceipt",
-    "ReviewStageStatus",
     "open_curation_analyzer",
     "select_units_for_analysis",
     "resolve_unit_selection",
-    "UnitSelectionSnapshot",
-    "UnitSelectionReceipt",
-    "SelectedGroup",
     "V2_UNIT_SELECTION_POLICIES",
-    # facade only: preflight reports
-    "PreflightCheck",
-    "PreflightReport",
-    "PreflightSessionReport",
-    "UnitMatchPreflightCheck",
-    "UnitMatchPreflightReport",
-    # typed run summaries / plans
-    "UnitMatchPlan",
-    "UnitMatchInputPlan",
-    "PipelineOutcome",
-    "PipelineStageSeconds",
-    "RunV2ConcatSummary",
-    "RunV2ConcatPipelineInputs",
-    "RunV2PipelineInputs",
-    "RunV2PipelineOptions",
-    "RunV2PipelineSessionFailed",
-    "RunV2PipelineSessionInputs",
-    "RunV2PipelineSessionOk",
-    "RunV2PipelineSessionRequiredInputs",
-    "RunV2PipelineSessionResult",
-    "RunV2PipelineSummary",
-    "RunV2SingleSessionSummary",
-    "RunV2UnitMatchSummary",
-    "EstimateMotionReceipt",
-    "MotionEstimateDiagnostics",
-    # enums / carriers
-    "MotionMode",
-    "SourceMode",
-    "StageStatus",
-    "UnitMatchCurationChoice",
-    "UnitMatchInputSummary",
-    "UnitMatchMemberChoices",
-    "UnitMatchStageSeconds",
 ]

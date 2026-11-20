@@ -82,7 +82,7 @@ def recording_content_fingerprint(
 
     timestamp_hashes: dict[str, str] = {}
     for segment in range(recording.get_num_segments()):
-        digest = hashlib.md5()
+        digest = hashlib.sha256()
         n_frames = recording.get_num_frames(segment_index=segment)
         # Chunked; the digest equals hashing the whole vector at once.
         for start in range(0, n_frames, 300_000):

@@ -899,9 +899,9 @@ def test_register_pipeline_preset_refuses_a_shipped_name(dj_conn, clone_env):
 
 @pytest.mark.unit
 def test_register_pipeline_preset_rejects_a_long_name():
-    """A name longer than the 64-character column is refused up front."""
-    with pytest.raises(ValueError, match="at most 64 characters"):
-        register_pipeline_preset("x" * 65, _custom_spec(), validate_rows=False)
+    """A name longer than the 200-character column is refused up front."""
+    with pytest.raises(ValueError, match="at most 200 characters"):
+        register_pipeline_preset("x" * 201, _custom_spec(), validate_rows=False)
 
 
 @pytest.mark.database

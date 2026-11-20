@@ -607,6 +607,19 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - v2 interval operations use `spyglass.utils.interval.Interval`, which
         gains `merge_touching` on `intersect` and `consolidate` and intersects
         disjoint lists in one pass. No stored value or id changes #1609
+    - v2 schema and API cleanups from review: `CurationV2.curation_source` is
+        `varchar(32)`; NWB `object_id` columns are `varchar(40)`; parameter,
+        rule-set, review-profile and preset names are `varchar(200)`; hash
+        columns are named by what they hash (`motion_input_hash`,
+        `analyzer_content_hash`, `figpack_params_hash`, `profile_params_hash`,
+        also `ReviewProfileRef.profile_params_hash`); recording trace and
+        timestamp digests use SHA-256 like the rest of v2, which changes
+        `content_hash` and the motion-estimate, UnitMatch and FigPack ids
+        built from these values; curation, member-export and evaluation
+        receipts record the GPU inventory as `not_recorded`;
+        `pipeline.__all__` lists the entry points and their handles, and the
+        report and summary types stay importable from `pipeline`. Existing v2
+        tables need the drop-and-declare above #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes

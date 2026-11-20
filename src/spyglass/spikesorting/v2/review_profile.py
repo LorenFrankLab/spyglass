@@ -41,7 +41,7 @@ _PROFILE_CONTENT_FIELDS = (
     "displayed_unit_properties",
     "label_options",
     "label_import_mode",
-    "profile_hash",
+    "profile_params_hash",
 )
 
 
@@ -52,18 +52,18 @@ class CurationReviewProfile(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
     - Re-inserting the same name and content is a no-op.
     - Changed content needs a new name.
     - The same content under a second name is refused.
-    - List order is semantic and included in ``profile_hash``.
+    - List order is semantic and included in ``profile_params_hash``.
     """
 
     definition = """
-    review_profile_name: varchar(64)
+    review_profile_name: varchar(200)
     ---
     -> QualityMetricParameters
     -> AutoCurationRules
     displayed_unit_properties: blob  # ordered built-in evaluation columns
     label_options: blob               # ordered built-in CurationLabel palette
     label_import_mode: enum('replace', 'overlay')
-    profile_hash: char(64)             # sha256 over recipe/display/import semantics
+    profile_params_hash: char(64)             # sha256 over recipe/display/import semantics
     """
 
     def insert(self, rows, *, replace=False, **kwargs):
@@ -115,7 +115,7 @@ class CurationReviewProfile(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
             row["review_profile_name"]: row for row in self.fetch(as_dict=True)
         }
         claimed_hashes = {
-            row["profile_hash"]: row["review_profile_name"]
+            row["profile_params_hash"]: row["review_profile_name"]
             for row in stored.values()
         }
         pending: list[dict] = []
@@ -139,15 +139,15 @@ class CurationReviewProfile(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
                         name,
                     )
                 continue
-            prior = claimed_hashes.get(row["profile_hash"])
+            prior = claimed_hashes.get(row["profile_params_hash"])
             if prior is not None:
                 raise DuplicateParameterContentError(
                     f"CurationReviewProfile {name!r} duplicates the content of "
-                    f"{prior!r} (profile_hash {row['profile_hash'][:12]}). "
+                    f"{prior!r} (profile_params_hash {row['profile_params_hash'][:12]}). "
                     "Reuse the existing profile name, or use a new name for "
                     "changed content."
                 )
-            claimed_hashes[row["profile_hash"]] = name
+            claimed_hashes[row["profile_params_hash"]] = name
             stored[name] = row
             pending.append(row)
         if pending:

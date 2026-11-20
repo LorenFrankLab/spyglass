@@ -265,11 +265,11 @@ def test_configured_lab_label_can_be_added_during_review():
 
 
 def test_review_config_hash_is_pinned():
-    """Persisted review identities keep their ``figpack_config_hash``."""
+    """Persisted review identities keep their ``figpack_params_hash``."""
     import uuid
 
     from spyglass.spikesorting.v2._review.annotations import (
-        figpack_config_hash,
+        figpack_params_hash,
     )
     from spyglass.spikesorting.v2._review.profile import ReviewDisplayOptions
     from spyglass.spikesorting.v2.curation_api import EvaluationSpec
@@ -280,7 +280,7 @@ def test_review_config_hash_is_pinned():
 
     profile = ReviewProfileRef(
         review_profile_name="pinned_profile",
-        profile_hash="a" * 64,
+        profile_params_hash="a" * 64,
         evaluation_spec=EvaluationSpec("metrics", "rules"),
         displayed_unit_properties=("snr", "isi_violation"),
         label_options=("accept", "mua", "noise"),
@@ -297,7 +297,7 @@ def test_review_config_hash_is_pinned():
         display_options=ReviewDisplayOptions(),
         reviewer="pinned_user",
     )
-    config_hash = figpack_config_hash(
+    config_hash = figpack_params_hash(
         sorting_id=uuid.UUID(int=1),
         curation_id=2,
         curation_uuid=uuid.UUID(int=2),
@@ -308,7 +308,7 @@ def test_review_config_hash_is_pinned():
         review_config=config,
     )
     assert config_hash == (
-        "6d09c6c5acb6eda1346c371765640f4d0a24f17f80d64fb5d13b7a4d3135f59f"
+        "11330eeec75aa2c617d996a0c091a9556f354a32f1ddc0e57ca7d23040cd8424"
     )
 
 

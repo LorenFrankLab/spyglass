@@ -180,7 +180,7 @@ def validate_unit_selection_snapshot(data: Mapping[str, Any]) -> dict:
             not isinstance(recipes, dict)
             or set(recipes) != _EVALUATION_RECIPE_FIELDS
             or any(
-                not isinstance(name, str) or not name or len(name) > 64
+                not isinstance(name, str) or not name or len(name) > 200
                 for name in recipes.values()
             )
         ):

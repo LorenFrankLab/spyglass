@@ -149,7 +149,10 @@ def test_browser_review_preview_commit_resume_and_continue(
                 & {"figpack_curation_id": review.review_id}
             ).fetch1("displayed_unit_properties")
         )
-        assert review_config["profile_hash"] == review.profile.profile_hash
+        assert (
+            review_config["profile_params_hash"]
+            == review.profile.profile_params_hash
+        )
         # The display budget is part of the review's identity and resumes
         # with it.
         assert review_config["display"] == review.display_options.as_dict()

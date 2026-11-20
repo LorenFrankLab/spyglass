@@ -86,6 +86,28 @@ def receipt(monkeypatch):
     )
 
 
+def test_capture_without_accelerators_skips_the_gpu_inventory(
+    receipt, monkeypatch
+):
+    """Stages that run no GPU code record the inventory as not recorded."""
+
+    def no_gpu_call():
+        raise AssertionError("nvidia-smi was queried")
+
+    monkeypatch.setattr(runtime, "_gpu_inventory", no_gpu_call)
+    captured = runtime.capture_runtime_environment(accelerators=False)
+    assert captured["accelerators"]["nvidia"] == {
+        "status": "not_recorded",
+        "devices": [],
+    }
+    assert len(runtime.runtime_environment_fingerprint(captured)) == 64
+    captured["accelerators"]["nvidia"]["devices"] = [
+        receipt["accelerators"]["nvidia"]
+    ]
+    with pytest.raises(ValueError, match="cannot contain devices"):
+        runtime.runtime_environment_fingerprint(captured)
+
+
 def test_capture_is_json_roundtrippable_and_ignores_arbitrary_environment(
     receipt, monkeypatch
 ):

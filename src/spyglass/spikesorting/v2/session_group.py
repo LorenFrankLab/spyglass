@@ -515,7 +515,7 @@ class ConcatenatedRecording(
     ---
     -> AnalysisNwbfile
     electrical_series_path: varchar(255)
-    object_id: varchar(72)
+    object_id: varchar(40)
     n_channels: int
     sampling_frequency: double
     total_duration_s: double

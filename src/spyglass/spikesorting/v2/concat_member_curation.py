@@ -145,7 +145,7 @@ class ConcatMemberCurationV2(
     ---
     -> Session
     -> AnalysisNwbfile
-    object_id: varchar(72)
+    object_id: varchar(40)
     n_units: int
     """
 
@@ -532,7 +532,8 @@ class ConcatMemberCurationV2(
                 curation_header={
                     **curation_header,
                     **runtime_environment_provenance(
-                        execution_params={"stage": "member_export"}
+                        execution_params={"stage": "member_export"},
+                        accelerators=False,
                     ),
                 },
                 merge_group_rows=merge_group_rows,

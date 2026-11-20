@@ -21,6 +21,7 @@ from spyglass.spikesorting.v2._core.signal_math import (
 )
 from spyglass.spikesorting.v2._storage.nwb import _ELECTRICAL_SERIES_PATH
 from spyglass.spikesorting.v2._storage.provenance import concrete_vectordata
+from spyglass.utils.interval import Interval
 
 STATISTICS_SPANS_INTERVALS = "spyglass_v2_statistics_spans"
 CONTINUITY_SPANS_INTERVALS = "spyglass_v2_continuity_spans"
@@ -325,17 +326,6 @@ def _spans(frame, start="start_sample", end="end_sample"):
     return frame[[start, end]].to_numpy(dtype=np.int64).reshape(-1, 2)
 
 
-def _merge_touching(spans) -> np.ndarray:
-    """Merge half-open ranges that touch, in order."""
-    merged: list[list[int]] = []
-    for start, end in np.asarray(spans, dtype=np.int64).reshape(-1, 2):
-        if merged and merged[-1][1] == start:
-            merged[-1][1] = int(end)
-        else:
-            merged.append([int(start), int(end)])
-    return np.asarray(merged, dtype=np.int64).reshape(-1, 2)
-
-
 def read_trace_file_spans(abs_path: str) -> TraceFileSpans:
     """Read a concat or motion-corrected file's spans, in any file generation.
 
@@ -426,7 +416,14 @@ def read_trace_file_spans(abs_path: str) -> TraceFileSpans:
         member_ends = frame["concat_end_sample"].to_numpy(np.int64)
     if CONCAT_PROVENANCE in scratch:
         if statistics is not None:
-            observed = _merge_touching(statistics)
+            observed = (
+                Interval(
+                    np.asarray(statistics, dtype=np.int64).reshape(-1, 2),
+                    warn=False,
+                )
+                .consolidate(merge_touching=True)
+                .times.reshape(-1, 2)
+            )
         else:
             header = _provenance_values_from_frame(scratch[CONCAT_PROVENANCE])
             observed = np.asarray(

@@ -261,7 +261,7 @@ class SorterParameters(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
 
     definition = """
     sorter: varchar(64)
-    sorter_params_name: varchar(128)
+    sorter_params_name: varchar(200)
     ---
     sorter_params: blob
     params_schema_version=0: int
@@ -458,7 +458,7 @@ class AnalyzerWaveformParameters(
     """
 
     definition = """
-    waveform_params_name: varchar(64)
+    waveform_params_name: varchar(200)
     ---
     waveform_params: blob
     params_schema_version=3: int
@@ -848,7 +848,7 @@ class Sorting(
     -> SortingSelection
     ---
     -> AnalysisNwbfile
-    object_id: varchar(72)
+    object_id: varchar(40)
     n_units: int
     time_of_sort=CURRENT_TIMESTAMP: timestamp  # database server time the row was inserted
     -> AnalyzerWaveformParameters.proj(display_waveform_params_name="waveform_params_name")

@@ -439,10 +439,10 @@ def test_zero_unit_sort_inventory_status_and_recompute_match():
     key = {"sorting_id": sid, "waveform_params_name": _DISPLAY}
     try:
         SortingAnalyzerVersions.populate(key, reserve_jobs=False)
-        status, analyzer_hash = (SortingAnalyzerVersions & key).fetch1(
-            "status", "analyzer_hash"
+        status, analyzer_content_hash = (SortingAnalyzerVersions & key).fetch1(
+            "status", "analyzer_content_hash"
         )
-        assert (status, analyzer_hash) == ("zero_units", None)
+        assert (status, analyzer_content_hash) == ("zero_units", None)
         SortingAnalyzerRecomputeSelection.attempt_all(key)
         SortingAnalyzerRecompute.populate(key, reserve_jobs=False)
         assert (SortingAnalyzerRecompute & key).fetch1("matched") == 1
