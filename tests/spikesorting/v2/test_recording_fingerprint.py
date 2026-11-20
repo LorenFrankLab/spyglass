@@ -87,7 +87,7 @@ def test_timestamp_hash_is_bounded_and_matches_whole_vector(
         traces=np.zeros((n_frames, 4), dtype=np.float32),
         timestamps=times,
     )
-    expected = hashlib.md5(
+    expected = hashlib.sha256(
         np.round(times, TIMESTAMP_ROUNDING).astype("<f8").tobytes()
     ).hexdigest()
     getitem = h5py.Dataset.__getitem__
