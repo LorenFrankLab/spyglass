@@ -49,12 +49,12 @@ from spyglass.spikesorting.v2._storage.nwb import StoredTraces
 from spyglass.spikesorting.v2._core.signal_math import timestamp_fingerprint
 from spyglass.spikesorting.v2.recording import Recording
 from spyglass.spikesorting.v2._core.table_integrity import (
-    FactoryOnlyMaster,
     ImmutableParamsLookup,
     SelectionMasterInsertGuard,
     _insert_parameter_rows,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.immutable import FactoryOnlyMaster
 from spyglass.spikesorting.v2._artifacts.manual import (
     apply_manual_exclusions,
     manual_exclusion_problem,

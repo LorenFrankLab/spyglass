@@ -1,4 +1,7 @@
-"""Every v2 exception shares one base class. DB-free."""
+"""Every exception class v2 defines shares one base class. DB-free.
+
+The shared table-guard errors v2 re-exports are DataJointErrors instead.
+"""
 
 import ast
 from importlib import import_module
@@ -34,7 +37,13 @@ def test_every_v2_exception_has_the_common_base():
 def test_direct_insert_refusal_is_one_error_type():
     """The selection guards and AutoCurationRules raise the same class, which
     stays a DataJointError for existing ``except`` clauses."""
+    from spyglass.spikesorting.v2 import exceptions
     from spyglass.spikesorting.v2.exceptions import UnsupportedDirectInsertError
+    from spyglass.utils.mixins import immutable
 
+    assert exceptions.ImmutableRowError is immutable.ImmutableRowError
+    assert (
+        UnsupportedDirectInsertError is immutable.UnsupportedDirectInsertError
+    )
     assert issubclass(UnsupportedDirectInsertError, dj.errors.DataJointError)
     assert issubclass(UnsupportedDirectInsertError, RuntimeError)

@@ -7,11 +7,20 @@ message. Each message names the failed invariant and the next action.
 
 from __future__ import annotations
 
-import datajoint as dj
+# Raised by the shared table guards v2 uses; importable from here.
+from spyglass.utils.mixins.immutable import (  # noqa: F401
+    ImmutableRowError,
+    UnsupportedDirectInsertError,
+)
 
 
 class SpikeSortingV2Error(Exception):
-    """Base class of every v2 exception; catch it for any v2 failure."""
+    """Base class of every exception v2 defines; catch it for a v2 failure.
+
+    The shared table-guard errors ``ImmutableRowError`` and
+    ``UnsupportedDirectInsertError`` are ``DataJointError`` subclasses, not
+    subclasses of this.
+    """
 
 
 class DuplicateSelectionError(SpikeSortingV2Error, ValueError):
@@ -330,26 +339,6 @@ class AnalyzerFolderInvalidError(AnalyzerFolderMissingError):
     Usually a partial folder from a killed build or out-of-band corruption.
     Subclasses ``AnalyzerFolderMissingError`` so audit paths treat it as
     absent.
-    """
-
-
-class ImmutableRowError(SpikeSortingV2Error, dj.errors.DataJointError):
-    """Raise on an in-place edit of a row that deterministic ids depend on.
-
-    Covers ``update1`` of identity-bearing masters and parameter rows and
-    ``insert(replace=True)``. Message names the table and says to insert a
-    new named row instead.
-    """
-
-
-class UnsupportedDirectInsertError(
-    SpikeSortingV2Error, dj.errors.DataJointError, RuntimeError
-):
-    """Raise on a direct insert into a structured Lookup with part rows.
-
-    Applies to tables such as ``AutoCurationRules`` whose validity depends on
-    ordered part rows. Message names the table, the rejected insert path, and
-    the supported helper (``insert_rules(row, rule_rows)``).
     """
 
 

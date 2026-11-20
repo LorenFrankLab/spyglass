@@ -296,8 +296,12 @@ def test_mixins_after_spyglass_mixin_define_nothing_it_defines():
     }
     sources = {
         "_core/table_integrity.py": (
-            "_IdentityMasterGuard",
             "SelectionMasterInsertGuard",
+            "ImmutableParamsLookup",
+        ),
+        ROOT.parents[1]
+        / "utils/mixins/immutable.py": (
+            "_IdentityMasterGuard",
             "FactoryOnlyMaster",
             "ImmutableParamsLookup",
         ),

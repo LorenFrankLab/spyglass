@@ -45,13 +45,13 @@ from spyglass.spikesorting.v2._core.lookup_validation import (
     insert_rows_to_dicts,
 )
 from spyglass.spikesorting.v2._core.table_integrity import (
-    FactoryOnlyMaster,
     foreign_key_referrers,
 )
 from spyglass.spikesorting.v2._recording.unit_metadata import (
     unit_brain_region_df,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.immutable import FactoryOnlyMaster
 from spyglass.utils.mixins.populate import _get_lock
 from spyglass.utils.mixins.populate import (
     unlink_staged_analysis_file as _unlink_staged_analysis_file,

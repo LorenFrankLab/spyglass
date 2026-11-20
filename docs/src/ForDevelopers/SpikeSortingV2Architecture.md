@@ -204,12 +204,15 @@ planned with `attempt_all`. The parameter Lookups provide `insert_default()`.
 ### Base class order
 
 `SpyglassMixin` is the first base of a v2 table, except as listed below
-([Mixin](../Features/Mixin.md)). A v2 mixin that only adds methods or guards
+([Mixin](../Features/Mixin.md)). A mixin that only adds methods or guards
 `insert` / `update1` comes next, before the DataJoint tier:
 `ImmutableParamsLookup`, `SelectionMasterInsertGuard`, `FactoryOnlyMaster` and
-the recompute mixins. `SelectionMasterInsertGuard` with `_xor_source = True`
-(`SortingSelection`, `MotionEstimateSelection`) also refuses a row naming zero
-or both of `recording_id` / `concat_recording_id`. These go first:
+the recompute mixins. The `ImmutableParamsLookup` and `FactoryOnlyMaster`
+guards are the shared ones in `spyglass.utils.mixins.immutable`; v2's
+`ImmutableParamsLookup` adds the defaults installer.
+`SelectionMasterInsertGuard` with `_xor_source = True` (`SortingSelection`,
+`MotionEstimateSelection`) also refuses a row naming zero or both of
+`recording_id` / `concat_recording_id`. These go first:
 
 - `StagedOutputCleanupMixin`: replaces `PopulateMixin._staged_outputs = None`,
     which `PopulateMixin.__init_subclass__` reads.

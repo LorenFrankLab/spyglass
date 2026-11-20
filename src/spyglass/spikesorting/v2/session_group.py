@@ -41,10 +41,10 @@ from spyglass.spikesorting.v2.recording import (
     SortGroupV2,  # noqa: F401
 )
 from spyglass.spikesorting.v2._core.table_integrity import (
-    FactoryOnlyMaster,
     SelectionMasterInsertGuard,
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.mixins.immutable import FactoryOnlyMaster
 from spyglass.utils.mixins.populate import StagedOutputs
 from spyglass.spikesorting.v2._core.selection_identity import (
     existing_selection_pk,
