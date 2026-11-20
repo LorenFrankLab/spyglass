@@ -133,6 +133,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Common
 
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Parse pip versions with a PEP 440 local label (e.g. `torch==2.5.1+cpu`)
+        in `UserEnvironment`; one such line disabled recompute for the env #1713
+    - `UserEnvironment.insert_current_env` returns the id it inserted, not the
+        requested id another environment already holds #1713
 
 - Decoding
 
@@ -167,6 +171,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - Match the v1 recompute environment with `nwb_hash.env_matches`: every
+        namespace in both the file and the session must agree, so an optional
+        extension loaded in the session (e.g. `ndx-pose`) no longer blocks
+        every recompute attempt, and `hdmf-common`, `hdmf-experimental` and
+        `ndx-franklab-novela` are compared (the old allowlist spelled them
+        with underscores, so it compared only `core`) #1713
 
 ## [0.6.0] (Sep 1st 2026)
 
