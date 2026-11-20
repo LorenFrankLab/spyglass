@@ -81,12 +81,46 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     data.
 3. `make_compute` must not access the database at all.
 4. `make_insert` is the only method that writes to the database.
-5. Each method returns a list; the next method receives those values as
-    positional arguments after `key`.
+5. Each method returns a list or tuple; the next method receives those values
+    as positional arguments after `key`.
 6. `make_compute` must not return `None`. DataJoint tests the result against
     `None` to decide whether to compute, so a `None` return computes a second
     time — inside the transaction — and then skips `make_insert`. Return `[]`
     when there is nothing to pass along.
+
+### Named results (optional)
+
+A method can return a `NamedTuple` in place of a list. DataJoint still unpacks
+it by position, so the field order must match the next method's parameters
+after `key`. The return site names each value, and the annotation states what
+the method returns:
+
+```python
+from typing import NamedTuple
+
+
+class MyTableFetched(NamedTuple):
+    data: np.ndarray
+    params: dict
+
+
+class MyTableComputed(NamedTuple):
+    result: dict
+
+
+class MyTable(SpyglassMixin, dj.Computed):
+    def make_fetch(self, key) -> MyTableFetched:
+        return MyTableFetched(
+            data=(UpstreamTable & key).fetch1("raw_data"),
+            params=(ParameterTable & key).fetch1("params"),
+        )
+
+    def make_compute(self, key, data, params) -> MyTableComputed:
+        return MyTableComputed(result=heavy_analysis(data, params))
+
+    def make_insert(self, key, result):
+        self.insert1(dict(key, **result))
+```
 
 ## Files written in `make_compute`
 
@@ -107,6 +141,9 @@ class MyTable(SpyglassMixin, dj.Computed):
             paths=(results_path,),  # other files or folders
         )
 ```
+
+With a [named result](#named-results-optional), read the fields by name:
+`computed.analysis_file_name`.
 
 Only list outputs unique to this attempt: they are deleted if the populate does
 not succeed. Outputs are kept once `make_insert` returns, so a failed commit
