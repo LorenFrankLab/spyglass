@@ -53,6 +53,11 @@ Every collected v2 test has exactly one effective tier:
 | `pipeline` | The complete sorting chain or session orchestration, including fixtures that already built it. |
 | `regression_gate` | Heavy scientific fixtures, memory, lifecycle acceptance and regeneration gates. |
 
+End-to-end acceptance probes, in any pipeline, carry the `acceptance` marker.
+`tests/conftest.py` skips them unless `--run-acceptance` is given, wherever the
+test file is. Spike sorting v2 keeps its probes in
+`tests/spikesorting/v2/acceptance`.
+
 Run another tier with `--v2-tier stage`, for example, or every tier except
 `unit` with `--v2-tier database`. These dependency tiers are independent of
 speed markers; database tiers use the normal Docker/database setup. The CI

@@ -51,10 +51,8 @@ from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
 from . import _ci_lanes
-from ._ci_lanes import (  # registered as this conftest's hooks
-    pytest_collection_modifyitems,
-    pytest_ignore_collect,
-)
+from ._ci_lanes import pytest_collection_modifyitems as _select_lane
+from ._ci_lanes import pytest_ignore_collect  # registered as a hook here
 from ._teardown_exit import escalate_exit_on_teardown_failure
 from .container import DockerMySQLManager
 from .data_downloader import FILE_PATHS, DataDownloader
@@ -428,8 +426,8 @@ def pytest_addoption(parser):
         dest="run_acceptance",
         default=False,
         help=(
-            "Run the spike-sorting v2 end-to-end acceptance probes "
-            "(tests marked `acceptance`, in tests/spikesorting/v2/acceptance). "
+            "Run the end-to-end acceptance probes (tests marked "
+            "`acceptance`, e.g. tests/spikesorting/v2/acceptance). "
             "Requires the MEArec tetrode and smoke fixtures, the "
             "spikesorting-v2-curation extras and a Chromium for Playwright; "
             "skipped by default."
@@ -606,6 +604,23 @@ def _block_unit_database_access():
     for name in ("connect", "query"):
         _UNIT_DATABASE_METHODS[name] = getattr(dj.Connection, name)
         setattr(dj.Connection, name, refuse)
+
+
+def pytest_collection_modifyitems(config, items):
+    """Select the ``--lane`` tests, then skip ``acceptance`` tests by default.
+
+    The skip is here, not in a subdirectory conftest, so it applies to a test
+    marked ``acceptance`` in any directory. ``--run-acceptance`` runs them.
+    """
+    _select_lane(config, items)
+    if config.getoption("run_acceptance"):
+        return
+    skip = pytest.mark.skip(
+        reason="acceptance probe: pass --run-acceptance to run"
+    )
+    for item in items:
+        if item.get_closest_marker("acceptance") is not None:
+            item.add_marker(skip)
 
 
 def pytest_sessionfinish(session, exitstatus):

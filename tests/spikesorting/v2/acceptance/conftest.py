@@ -1,6 +1,7 @@
-"""Fixtures and opt-in gating for the v2 end-to-end acceptance probes.
+"""Fixtures for the v2 end-to-end acceptance probes.
 
-The probes take minutes each and run only with ``--run-acceptance``.
+The probes take minutes each and run only with ``--run-acceptance``; the
+skip is in ``tests/conftest.py``, so it covers any test marked ``acceptance``.
 """
 
 from pathlib import Path
@@ -12,22 +13,6 @@ import pytest
 TETRODE_FIXTURE = (
     Path(__file__).resolve().parents[1] / "fixtures" / "mearec_tetrode_60s.nwb"
 )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip ``acceptance``-marked items unless ``--run-acceptance`` is given.
-
-    A conftest-level ``pytest_collection_modifyitems`` receives every item of
-    the session, not only this directory's, so items are selected by marker.
-    """
-    if config.getoption("run_acceptance"):
-        return
-    skip = pytest.mark.skip(
-        reason="acceptance probe: pass --run-acceptance to run"
-    )
-    for item in items:
-        if item.get_closest_marker("acceptance") is not None:
-            item.add_marker(skip)
 
 
 @pytest.fixture(scope="module")
