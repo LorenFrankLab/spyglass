@@ -23,6 +23,7 @@ import datajoint as dj
 from spyglass.spikesorting.v2._core.json_io import read_json, write_json
 from spyglass.spikesorting.v2._review.annotations import (
     annotations_payload_hash,
+    parse_curation_unit_id,
 )
 from spyglass.spikesorting.v2.curation_api import CurationRef
 from spyglass.utils.progress import progress_reporter
@@ -450,7 +451,11 @@ def _run_action(*, review_id, root, request, state, report):
             )
         elif action == "inspect":
             report("Preparing selected-unit inspection…")
-            units = request.get("unit_ids", [])
+            # The browser sends unit ids as strings in newer FigPack releases.
+            units = [
+                parse_curation_unit_id(unit)
+                for unit in request.get("unit_ids", [])
+            ]
             time_range = request.get("time_range")
             view = review.inspect_units(
                 units,
