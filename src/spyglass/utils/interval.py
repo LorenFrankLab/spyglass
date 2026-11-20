@@ -266,8 +266,6 @@ class Interval:
         timestamps: np.ndarray,
         as_indices: Optional[bool] = False,
         padding: Optional[int] = None,
-        *,
-        half_open_mask: bool = False,
     ) -> T:
         """Find timestamps that are contained in an interval list.
 
@@ -279,19 +277,7 @@ class Interval:
             If False, return the timestamps themselves. Defaults to False.
         padding : int, optional
             If True, pad the first and last timestamps by val. Defaults to None.
-        half_open_mask : bool, optional
-            If True, return a boolean mask shaped like `timestamps`, True where
-            a timestamp is in some half-open [start, stop) interval;
-            `as_indices` and `padding` are ignored. Defaults to False.
         """
-        if half_open_mask:
-            timestamps = np.asarray(timestamps)
-            rows = self._consolidate(self.times, merge_touching=True)
-            if not len(rows):
-                return np.zeros(timestamps.shape, dtype=bool)
-            index = np.searchsorted(rows[:, 0], timestamps, side="right") - 1
-            return (index >= 0) & (timestamps < rows[np.maximum(index, 0), 1])
-
         ind = []
         for interval in self.times:
             ind += np.ravel(
@@ -351,6 +337,8 @@ class Interval:
             return self._merge_touching(interval_list)
 
         interval_list = interval_list[np.argsort(interval_list[:, 0])]
+        if self._is_disjoint(interval_list):  # nothing to merge
+            return interval_list
         interval_list = self._union_consolidate(interval_list).times
 
         # reduce may convert to 1D, so check and expand
@@ -439,13 +427,14 @@ class Interval:
 
         Gives the same overlaps as comparing every pair, in one pass.
         """
+        rows1, rows2 = interval_list1.tolist(), interval_list2.tolist()
         intersection, i, j = [], 0, 0
-        while i < len(interval_list1) and j < len(interval_list2):
-            start = max(interval_list1[i][0], interval_list2[j][0])
-            stop = min(interval_list1[i][1], interval_list2[j][1])
+        while i < len(rows1) and j < len(rows2):
+            start = max(rows1[i][0], rows2[j][0])
+            stop = min(rows1[i][1], rows2[j][1])
             if start < stop:
                 intersection.append([start, stop])
-            if interval_list1[i][1] < interval_list2[j][1]:
+            if rows1[i][1] < rows2[j][1]:
                 i += 1
             else:
                 j += 1

@@ -135,9 +135,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
     - Move `Interval` to `spyglass.utils.interval`, importable without a
         database; `common_interval` re-exports it #1729
-    - Add `merge_touching` to `Interval.intersect` and `Interval.consolidate`
-        and `half_open_mask` to `Interval.contains`; `intersect` compares
-        sorted, disjoint lists in one pass #1733
+    - Add `merge_touching` to `Interval.intersect` and `Interval.consolidate`;
+        `consolidate` and `intersect` take one pass over disjoint lists, and
+        an empty list no longer raises #1733
 
 - Decoding
 
