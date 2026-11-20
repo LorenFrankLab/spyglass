@@ -21,11 +21,11 @@ from spyglass.utils.numerical import (
     integer_scalar,
     integer_vector,
 )
+from spyglass.spikesorting._observed_time import intersect_interval_sets
 from spyglass.spikesorting.v2._core.enums import CurationLabel
 from spyglass.spikesorting.v2._core.signal_math import (
     _MERGE_DEDUP_DELTA_MS,
     _segment_times_at,
-    intersect_interval_sets,
     kept_intervals,
 )
 from spyglass.spikesorting.v2._storage.provenance import (

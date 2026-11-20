@@ -281,14 +281,12 @@ def test_intersect_merge_touching_drops_zero_length_rows_equals_interval():
 def test_intersect_interval_sets_equals_interval_intersect_chain():
     """Equal to chained ``Interval.intersect`` on non-touching sets.
 
-    The one caller, ``_curated_obs_intervals``, intersects the stored
-    ``obs_intervals`` of merged units, which never have touching rows.
+    Its callers intersect observation masks (``ObservationAvailability``,
+    merged units' ``obs_intervals``), which never have touching rows.
     """
     from functools import reduce
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        intersect_interval_sets,
-    )
+    from spyglass.spikesorting._observed_time import intersect_interval_sets
     from spyglass.utils.interval import Interval
 
     rng = np.random.default_rng(171117)
@@ -335,8 +333,7 @@ def test_consolidate_merge_touching_equals_interval_union():
     Zero-length rows included: one inside or touching another row merges
     into it, an isolated one is kept. ``complement_frame_ranges`` and
     ``restrict_recording_times`` merge frame ranges this way, and
-    ``observed_metrics`` merges observation windows after dropping
-    zero-length rows.
+    ``observed_metrics`` merges observation windows.
     """
     from spyglass.utils.interval import Interval
 
@@ -357,8 +354,8 @@ def test_consolidate_merge_touching_equals_interval_union():
 # ---------- membership and overlap predicates -------------------------------
 
 
-def test_contains_times_equals_interval_half_open_mask():
-    """``contains_times`` is ``Interval.contains(half_open_mask=True)``.
+def test_contains_times_is_half_open_unlike_interval():
+    """``contains_times`` excludes a stop and returns a per-time mask.
 
     Observation intervals are half-open, so a spike at a stop was not
     observed. The default ``Interval.contains`` includes both ends and
@@ -380,9 +377,6 @@ def test_contains_times_equals_interval_half_open_mask():
         ).any(axis=0)
         np.testing.assert_array_equal(
             contains_times(rows, times), expected, err_msg=rows.tolist()
-        )
-        np.testing.assert_array_equal(
-            Interval(rows).contains(times, half_open_mask=True), expected
         )
 
 

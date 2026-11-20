@@ -165,35 +165,6 @@ def subtract_intervals(base, removed, *, inclusive_stop=False) -> list[tuple]:
     return kept
 
 
-def intersect_interval_sets(interval_sets):
-    """Intersect a list of ``(n, 2)`` sorted, non-overlapping interval arrays.
-
-    Returns the ``(m, 2)`` spans in every set: the observation window of a
-    merged unit. ``None`` entries are skipped; no sets gives ``(0, 2)``.
-    """
-    import numpy as np
-
-    from spyglass.utils.interval import Interval
-
-    sets = [
-        np.asarray(s, dtype=float).reshape(-1, 2)
-        for s in interval_sets
-        if s is not None
-    ]
-    if not sets:
-        return np.empty((0, 2), dtype=float)
-    acc = sets[0]
-    for other in sets[1:]:
-        acc = (
-            Interval(acc, warn=False)
-            .intersect(other, merge_touching=True)
-            .times.reshape(-1, 2)
-        )
-        if acc.size == 0:
-            break
-    return acc
-
-
 def frames_with_window_in_one_span(frames, spans, *, n_before, n_after):
     """Say which frames have their whole waveform window inside one span.
 

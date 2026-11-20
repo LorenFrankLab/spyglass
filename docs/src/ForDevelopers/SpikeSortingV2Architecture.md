@@ -444,22 +444,20 @@ their lifecycle and serialization checks when changing supported versions.
 Interval sets in seconds and in frames use `spyglass.utils.interval.Interval`,
 which imports without a database, for example the sort interval within the raw
 data valid times (`_recording.restriction.intended_save_intervals`). Build it
-with `warn=False`: outside tests the default logs duplicate or overlapping rows
-and fails on an empty `(0, 2)` array.
+with `warn=False`: outside tests the default logs duplicate or overlapping rows.
 
 - Observation masks are intersected with `intersect(merge_touching=True)`,
     which merges touching rows and cannot leave overlapping output from a
     zero-length row; `ObservationAvailability.valid_bins` needs that one form.
-    `ObservationAvailability.restrict`, `population_availability` and
-    `intersect_interval_sets` (merged units' `obs_intervals`) use it.
+    `_observed_time.intersect_interval_sets` does this for
+    `ObservationAvailability.restrict`, `population_availability` and merged
+    units' `obs_intervals`.
 - `consolidate(merge_touching=True)` merges manual exclusions
-    (`normalize_manual_exclusions`), `observed_metrics` windows after dropping
-    zero-length rows, and frame ranges in `complement_frame_ranges` and
-    `_recording.restriction`. Integer frames stay int64.
+    (`normalize_manual_exclusions`), `observed_metrics` windows, and frame
+    ranges in `complement_frame_ranges` and `_recording.restriction`. Integer
+    frames stay int64.
 - Frame spans that meet at a timestamp gap stay separate rows: statistics spans
     and `observed_intervals` use the default `intersect`.
-- `_observed_time.contains_times` is `contains(half_open_mask=True)`: a spike
-    at a stop was not observed.
 
 v2 keeps its own helper only where a caller needs a result `Interval` does not
 give. `tests/spikesorting/v2/test_interval_library_parity.py` checks each
@@ -471,6 +469,9 @@ difference.
     exclusions against artifact valid times).
 - `_artifacts.manual.ineffective_manual_exclusions` tests half-open exclusions
     against closed valid rows.
+- `_observed_time.contains_times` returns a per-time mask of half-open rows,
+    so a spike at a stop was not observed. `Interval.contains` includes both
+    ends and returns the contained values.
 
 ### Run requests and stages
 

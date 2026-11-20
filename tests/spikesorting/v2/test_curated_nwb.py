@@ -39,9 +39,7 @@ def _write_units_nwb(path, specs, *, with_obs=True):
 
 
 def test_intersect_interval_sets():
-    from spyglass.spikesorting.v2._core.signal_math import (
-        intersect_interval_sets,
-    )
+    from spyglass.spikesorting._observed_time import intersect_interval_sets
 
     full = np.array([[0.0, 1.0]])
     # identical inputs -> the shared window (common single-sort case).

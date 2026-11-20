@@ -584,15 +584,10 @@ def test_intersect_matches_pairwise_reference(interval_obj):
         ), f"Interval.intersect mismatch for {one.tolist()} & {two.tolist()}"
 
 
-def test_interval_list_contains_half_open_mask(interval_obj, example_interval):
-    interval, timestamps = example_interval
-    mask = interval_obj(interval).contains(timestamps, half_open_mask=True)
-    assert mask.tolist() == [False, True, False, True, False, False]
-
-    # Unsorted and touching rows; the mask keeps the shape of the timestamps
-    rows = np.array([[6, 8], [1, 4], [4, 6]])
-    times = np.array([[0, 1, 4], [5, 8, 9]])
-    mask = interval_obj(rows).contains(times, half_open_mask=True)
-    assert mask.tolist() == [[False, True, True], [True, False, False]]
-    empty = interval_obj(np.empty((0, 2)), warn=False)
-    assert not empty.contains(times, half_open_mask=True).any()
+def test_consolidate_disjoint_and_empty_lists(interval_obj):
+    """Disjoint rows come back sorted and unmerged; an empty list is kept."""
+    rows = np.array([[4, 6], [0, 2], [2, 3]])
+    ret = interval_obj(rows).consolidate().times
+    assert ret.tolist() == [[0, 2], [2, 3], [4, 6]]
+    empty = interval_obj(np.empty((0, 2)), warn=True)
+    assert empty.consolidate().times.shape == (0, 2)

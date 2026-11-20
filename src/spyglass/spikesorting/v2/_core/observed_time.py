@@ -77,8 +77,8 @@ def observed_metrics(
     Presence means at least one observed spike per fixed-width bin. Partly
     observed bins contribute only their observed duration; excluded bins
     contribute nothing. No observed exposure yields unavailable metrics.
-    ``intervals`` are first sorted, merged and stripped of zero-length rows,
-    so duplicated or overlapping time counts once. Malformed windows or event
+    ``intervals`` are first sorted and merged, so duplicated or overlapping
+    time counts once. Malformed windows or event
     vectors raise rather than becoming missing exposure or discarded spikes.
     """
     spike_times = finite_vector(
@@ -89,7 +89,6 @@ def observed_metrics(
     bin_duration_s = finite_scalar(
         bin_duration_s, name="observed_metrics bin_duration_s", positive=True
     )
-    intervals = intervals[intervals[:, 1] > intervals[:, 0]]
     intervals = (
         Interval(intervals, warn=False)
         .consolidate(merge_touching=True)

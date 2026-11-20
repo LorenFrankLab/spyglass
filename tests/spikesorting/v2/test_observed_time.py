@@ -137,10 +137,10 @@ def test_observed_metrics_weight_partial_bins_and_ignore_excluded_spikes():
 
 def test_merge_touching_intersect_normalizes_duplicates_and_order():
     """The intersection ``ObservationAvailability.restrict`` uses."""
-    from spyglass.utils.interval import Interval
+    from spyglass.spikesorting._observed_time import intersect_interval_sets
 
     def intersect(left, right):
-        return Interval(left).intersect(right, merge_touching=True).times
+        return intersect_interval_sets([left, right])
 
     duplicated = np.array([[0.0, 10.0], [0.0, 10.0]])
     result = intersect(duplicated, duplicated)

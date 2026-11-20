@@ -332,9 +332,7 @@ def test_intersect_interval_sets_matches_per_sample_mask():
     """The intersection holds exactly the samples present in every set."""
     import numpy as np
 
-    from spyglass.spikesorting.v2._core.signal_math import (
-        intersect_interval_sets,
-    )
+    from spyglass.spikesorting._observed_time import intersect_interval_sets
 
     rng = np.random.default_rng(1116)
     for _ in range(2000):

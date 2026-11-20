@@ -282,9 +282,6 @@ def _consolidate_regular_intervals(
     if intervals.shape[1] != 2:
         raise ValueError("Input array must have shape (N_Intervals, 2).")
 
-    if not np.all(intervals[:-1] <= intervals[1:]):
-        intervals = intervals[np.argsort(intervals[:, 0])]
-
     start_indices = _regular_grid_searchsorted(
         intervals[:, 0], t_start, sampling_frequency, side="left"
     )
@@ -540,7 +537,6 @@ def restrict_recording_times(recording, valid_times):
     from spyglass.utils.interval import Interval
 
     intervals = np.asarray(valid_times, dtype=float).reshape(-1, 2)
-    intervals = intervals[np.argsort(intervals[:, 0])]
     slices, timestamps = [], []
     previous_end = None
     for segment_index in range(recording.get_num_segments()):

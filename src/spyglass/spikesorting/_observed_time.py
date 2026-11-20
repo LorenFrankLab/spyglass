@@ -47,7 +47,10 @@ def normalize_observation_provenance(provenance):
 
 
 def contains_times(intervals, times):
-    """Return whether each time falls inside ``intervals``."""
+    """Return whether each time falls inside a row of ``intervals``.
+
+    ``intervals`` are half-open, sorted by start, and do not overlap.
+    """
     intervals = finite_intervals(intervals, name="contains_times intervals")
     # Keep the input shape of ``times``.
     times = np.asarray(times)
@@ -55,7 +58,36 @@ def contains_times(intervals, times):
     times = finite_vector(
         times.reshape(-1), name="contains_times times"
     ).reshape(shape)
-    return Interval(intervals, warn=False).contains(times, half_open_mask=True)
+    if not len(intervals):
+        return np.zeros(times.shape, dtype=bool)
+    indices = np.searchsorted(intervals[:, 0], times, side="right") - 1
+    return (indices >= 0) & (times < intervals[np.maximum(indices, 0), 1])
+
+
+def intersect_interval_sets(interval_sets):
+    """Intersect ``(n, 2)`` sorted, non-overlapping interval arrays.
+
+    Returns the ``(m, 2)`` spans in every set, with touching spans merged:
+    the observed time of a merged unit or of a unit population. ``None``
+    entries are skipped; no sets gives ``(0, 2)``.
+    """
+    sets = [
+        np.asarray(s, dtype=float).reshape(-1, 2)
+        for s in interval_sets
+        if s is not None
+    ]
+    if not sets:
+        return np.empty((0, 2), dtype=float)
+    acc = sets[0]
+    for other in sets[1:]:
+        acc = (
+            Interval(acc, warn=False)
+            .intersect(other, merge_touching=True)
+            .times.reshape(-1, 2)
+        )
+        if acc.size == 0:
+            break
+    return acc
 
 
 @dataclass(frozen=True)
@@ -112,11 +144,7 @@ class ObservationAvailability:
         )
         if self.intervals is None:
             return intervals
-        return (
-            Interval(intervals, warn=False)
-            .intersect(self.intervals, merge_touching=True)
-            .times.reshape(-1, 2)
-        )
+        return intersect_interval_sets([intervals, self.intervals])
 
     def valid_bins(self, time):
         """Only bins wholly inside an observed span are available."""
@@ -137,7 +165,7 @@ class ObservationAvailability:
 
 def population_availability(snapshots):
     """Combine selected-unit observation snapshots; ignore empty members."""
-    common = None
+    masks = []
     unknown = []
     for source, unit_ids, provenance in snapshots:
         if not len(unit_ids):
@@ -151,16 +179,12 @@ def population_availability(snapshots):
         indices = dict.fromkeys(
             observation["unit_mask_ids"][str(u)] for u in unit_ids
         )
-        for index in indices:
-            mask = observation["masks"][index]
-            intervals = finite_intervals(
-                mask, name=f"population_availability source {source} intervals"
+        masks.extend(
+            finite_intervals(
+                observation["masks"][index],
+                name=f"population_availability source {source} intervals",
             )
-            common = (
-                intervals
-                if common is None
-                else Interval(common, warn=False)
-                .intersect(intervals, merge_touching=True)
-                .times.reshape(-1, 2)
-            )
+            for index in indices
+        )
+    common = intersect_interval_sets(masks) if masks else None
     return ObservationAvailability(common, tuple(unknown))
