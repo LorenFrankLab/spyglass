@@ -87,7 +87,7 @@ class UnmappedPreprocessingWaveformsError(SpikeSortingV2Error, ValueError):
 
     v2 picks the display and metric waveform windows by preprocessing row; a
     custom row needs a ``PreprocessingWaveformParameters`` row. Message
-    carries the insert to run and the shipped window pairs.
+    names the row to insert and the shipped window pairs.
     """
 
 

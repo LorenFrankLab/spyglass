@@ -607,7 +607,7 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
                 f"{label}. Insert it (e.g. via initialize_v2_defaults() or the "
                 "table's insert) before registering the preset."
             )
-    # Raises UnmappedPreprocessingWaveformsError with the insert to run.
+    # Raises UnmappedPreprocessingWaveformsError naming the row to insert.
     waveform_params_for_preprocessing(preset.preprocessing_params_name)
 
 
