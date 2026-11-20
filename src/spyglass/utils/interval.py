@@ -266,6 +266,8 @@ class Interval:
         timestamps: np.ndarray,
         as_indices: Optional[bool] = False,
         padding: Optional[int] = None,
+        *,
+        half_open_mask: bool = False,
     ) -> T:
         """Find timestamps that are contained in an interval list.
 
@@ -277,7 +279,19 @@ class Interval:
             If False, return the timestamps themselves. Defaults to False.
         padding : int, optional
             If True, pad the first and last timestamps by val. Defaults to None.
+        half_open_mask : bool, optional
+            If True, return a boolean mask shaped like `timestamps`, True where
+            a timestamp is in some half-open [start, stop) interval;
+            `as_indices` and `padding` are ignored. Defaults to False.
         """
+        if half_open_mask:
+            timestamps = np.asarray(timestamps)
+            rows = self._consolidate(self.times, merge_touching=True)
+            if not len(rows):
+                return np.zeros(timestamps.shape, dtype=bool)
+            index = np.searchsorted(rows[:, 0], timestamps, side="right") - 1
+            return (index >= 0) & (timestamps < rows[np.maximum(index, 0), 1])
+
         ind = []
         for interval in self.times:
             ind += np.ravel(
@@ -325,12 +339,16 @@ class Interval:
     def union_consolidate(self) -> T:
         return Interval(self._union_consolidate(self.times), **self.kwargs)
 
-    def _consolidate(self, interval_list: IntervalLike) -> T:
+    def _consolidate(
+        self, interval_list: IntervalLike, merge_touching: bool = False
+    ) -> T:
         """Consolidate overlapping intervals in an interval list."""
         if not isinstance(interval_list, np.ndarray):
             interval_list = np.asarray(interval_list)
         if interval_list.ndim == 1:
             return self._expand_1d(interval_list)
+        if merge_touching:
+            return self._merge_touching(interval_list)
 
         interval_list = interval_list[np.argsort(interval_list[:, 0])]
         interval_list = self._union_consolidate(interval_list).times
@@ -338,8 +356,30 @@ class Interval:
         # reduce may convert to 1D, so check and expand
         return self._expand_1d(interval_list)
 
-    def consolidate(self) -> T:
-        return Interval(self._consolidate(self.times), **self.kwargs)
+    @staticmethod
+    def _merge_touching(interval_list: np.ndarray) -> np.ndarray:
+        """Sort (n, 2) rows by start and merge rows that overlap or touch."""
+        if not len(interval_list):
+            return interval_list
+        rows = interval_list[np.argsort(interval_list[:, 0], kind="stable")]
+        # A row opens a new interval only if it starts after every earlier stop
+        reach = np.maximum.accumulate(rows[:, 1])
+        first = np.flatnonzero(np.r_[True, rows[1:, 0] > reach[:-1]])
+        last = np.r_[first[1:] - 1, len(rows) - 1]
+        return np.column_stack((rows[first, 0], reach[last]))
+
+    def consolidate(self, *, merge_touching: bool = False) -> T:
+        """Merge overlapping intervals.
+
+        Parameters
+        ----------
+        merge_touching : bool, optional
+            If True, also merge intervals that share an endpoint, so no two
+            output intervals touch. Defaults to False.
+        """
+        return Interval(
+            self._consolidate(self.times, merge_touching), **self.kwargs
+        )
 
     @staticmethod
     def _set_intersect(
@@ -355,20 +395,25 @@ class Interval:
         interval1: IntervalLike,
         interval2: IntervalLike,
         min_length: Optional[float] = 0,
+        merge_touching: bool = False,
     ) -> T:
         """Finds the intersection of two interval lists."""
 
         # Consolidate interval lists to disjoint by sorting & applying union
-        interval_list1 = self._consolidate(interval1)
-        interval_list2 = self._consolidate(interval2)
+        interval_list1 = self._consolidate(interval1, merge_touching)
+        interval_list2 = self._consolidate(interval2, merge_touching)
 
-        # then do pairwise comparison and collect intersections
-        intersection = [
-            self._set_intersect(i2, i1)
-            for i2 in interval_list2
-            for i1 in interval_list1
-            if self._set_intersect(i1, i2) is not None
-        ]
+        if self._is_disjoint(interval_list1) and self._is_disjoint(
+            interval_list2
+        ):
+            intersection = self._sweep_intersect(interval_list1, interval_list2)
+        else:  # pairwise comparison to collect intersections
+            intersection = [
+                self._set_intersect(i2, i1)
+                for i2 in interval_list2
+                for i1 in interval_list1
+                if self._set_intersect(i1, i2) is not None
+            ]
 
         # if no intersection, then return an empty list
         if not intersection:
@@ -379,8 +424,39 @@ class Interval:
 
         return self._by_length(intersection, min_length=min_length)
 
+    @staticmethod
+    def _is_disjoint(interval_list: np.ndarray) -> bool:
+        """Whether each row starts at or after the previous row's stop."""
+        return len(interval_list) < 2 or bool(
+            np.all(interval_list[1:, 0] >= interval_list[:-1, 1])
+        )
+
+    @staticmethod
+    def _sweep_intersect(
+        interval_list1: np.ndarray, interval_list2: np.ndarray
+    ) -> List[List[float]]:
+        """Positive-length overlaps of two sorted, disjoint interval lists.
+
+        Gives the same overlaps as comparing every pair, in one pass.
+        """
+        intersection, i, j = [], 0, 0
+        while i < len(interval_list1) and j < len(interval_list2):
+            start = max(interval_list1[i][0], interval_list2[j][0])
+            stop = min(interval_list1[i][1], interval_list2[j][1])
+            if start < stop:
+                intersection.append([start, stop])
+            if interval_list1[i][1] < interval_list2[j][1]:
+                i += 1
+            else:
+                j += 1
+        return intersection
+
     def intersect(
-        self, other: IntervalLike, min_length: Optional[float] = 0
+        self,
+        other: IntervalLike,
+        min_length: Optional[float] = 0,
+        *,
+        merge_touching: bool = False,
     ) -> T:
         """Finds the intersections between this and another interval list.
 
@@ -392,13 +468,18 @@ class Interval:
             Interval list to intersect with self.
         min_length : float, optional.
             Minimum length of intervals to include, default 0
+        merge_touching : bool, optional
+            If True, first merge the intervals of each list that overlap or
+            touch, so touching intervals come out as one. Defaults to False.
 
         Returns
         -------
         interval_list: np.array, (N,2)
         """
         return Interval(
-            self._intersect(self.times, self._extract(other), min_length),
+            self._intersect(
+                self.times, self._extract(other), min_length, merge_touching
+            ),
             **self.kwargs,
         )
 
