@@ -370,6 +370,9 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     #1686
 - Add `spyglass.utils.numerical` validators for integer and finite numeric
     arguments #1727
+- Add `ImmutableParamsLookup` and `FactoryOnlyMaster` mixins in
+    `spyglass.utils.mixins.immutable`, which block in-place edits of parameter
+    rows and direct inserts into factory-built masters #XXXX
 
 ### Pipelines
 
