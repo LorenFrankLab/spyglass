@@ -30,7 +30,7 @@ class SIReproduction(NamedTuple):
     reproduces : str
         What the copy fixes or reproduces.
     validated_si : tuple of str
-        SpikeInterface version prefixes it is validated against.
+        SpikeInterface ``major.minor`` releases it is validated on.
     probe : str
         How it checks SpikeInterface at run time, or why it does not.
     """
@@ -41,8 +41,7 @@ class SIReproduction(NamedTuple):
 
 
 #: Each v2 copy or patch of SpikeInterface internals, validated on its own so
-#: a new release can keep one and drop another (``Dependencies.md``). Stricter
-#: than the v0/v1 read shims' ``spikesorting._si_compat.TESTED_SI_VERSIONS``.
+#: a new release can keep one and drop another (``Dependencies.md``).
 SI_REPRODUCTIONS: dict[str, SIReproduction] = {
     "nn_noise_overlap_sparsity": SIReproduction(
         reproduces=(
@@ -123,14 +122,16 @@ def require_validated_spikeinterface(reproduction: str) -> None:
     """
     import spikeinterface
 
+    from spyglass.spikesorting._si_compat import installed_si_release
+
     entry = SI_REPRODUCTIONS[reproduction]
-    version = spikeinterface.__version__
-    if not version.startswith(entry.validated_si):
+    if installed_si_release() not in entry.validated_si:
         raise RuntimeError(
             f"spikesorting v2: {reproduction} reproduces SpikeInterface "
             f"{', '.join(entry.validated_si)} internals ({entry.reproduces}), "
-            f"but SpikeInterface {version} is installed. Install the pinned "
-            "version with the 'spikesorting' extra (spikeinterface==0.104.3)."
+            f"but SpikeInterface {spikeinterface.__version__} is installed. "
+            "Install the pinned version with the 'spikesorting' extra "
+            "(spikeinterface==0.104.3)."
         )
 
 

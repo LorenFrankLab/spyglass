@@ -13,14 +13,12 @@ import importlib
 import importlib.util
 import warnings
 
-#: SpikeInterface releases these shims are tested on: 0.99 in the legacy CI
-#: lane, 0.104 in the others. Other releases warn. v2's copies of SI
-#: internals are validated separately (``v2/_core/si_runtime.py``).
+#: Releases these shims are tested on (0.99 in the legacy CI lane, 0.104 in
+#: the others); other releases warn.
 TESTED_SI_VERSIONS = ("0.99", "0.104")
 
-#: Capability -> its providers in order of preference: a
-#: ``"module:attribute"`` target and the keyword arguments it is called with.
-#: A release that moves an API needs one more provider here.
+#: Capability -> providers in preference order, each a ``"module:attribute"``
+#: target and its keyword arguments. A moved API needs one more provider.
 _PROVIDERS: dict[str, tuple[tuple[str, dict], ...]] = {
     # ``metrics``, not ``metrics.quality``, which lacks ``compute_num_spikes``.
     "quality_metrics_module": (
@@ -43,20 +41,24 @@ _PROVIDERS: dict[str, tuple[tuple[str, dict], ...]] = {
 }
 
 
+def installed_si_release() -> str:
+    """The installed SpikeInterface's ``major.minor``, e.g. ``"0.104"``."""
+    import spikeinterface
+
+    return ".".join(spikeinterface.__version__.split(".")[:2])
+
+
 @functools.cache
 def _warn_if_untested() -> None:
     """Warn once per process if the installed SI is not a tested release."""
     import spikeinterface
-    from packaging.version import Version
 
-    installed = spikeinterface.__version__
-    release = ".".join(str(part) for part in Version(installed).release[:2])
-    if release not in TESTED_SI_VERSIONS:
+    if installed_si_release() not in TESTED_SI_VERSIONS:
         warnings.warn(
-            f"SpikeInterface {installed} is installed, but the v0/v1 "
-            "read-path shims (spyglass.spikesorting._si_compat) are tested "
-            f"only on SpikeInterface {', '.join(TESTED_SI_VERSIONS)}. Reading "
-            "saved v0/v1 recordings, sortings and waveforms may fail.",
+            f"SpikeInterface {spikeinterface.__version__} is installed, but "
+            "the v0/v1 read-path shims (spyglass.spikesorting._si_compat) are "
+            f"tested only on SpikeInterface {', '.join(TESTED_SI_VERSIONS)}. "
+            "Reading saved v0/v1 recordings, sortings and waveforms may fail.",
             RuntimeWarning,
             stacklevel=4,
         )
