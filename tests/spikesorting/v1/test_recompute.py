@@ -97,6 +97,9 @@ def test_has_matching_env_ignores_optional_namespace(
     monkeypatch.setattr(tbl, "key_env", lambda key: dict(file_env))
     assert tbl._has_matching_env(dict()), "Optional namespace blocked match"
 
+    file_env["hdmf-common"] = "0.0.0"
+    assert not tbl._has_matching_env(dict()), "hdmf-common mismatch matched"
+
     file_env["core"] = "0.0.0"
     assert not tbl._has_matching_env(dict()), "Core version mismatch matched"
 

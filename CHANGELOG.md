@@ -171,9 +171,12 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
-    - Match the v1 recompute environment on required namespaces only, so an
-        optional extension loaded in the session (e.g. `ndx-pose`) no longer
-        blocks every recompute attempt #1713
+    - Match the v1 recompute environment with `nwb_hash.env_matches`: every
+        namespace in both the file and the session must agree, so an optional
+        extension loaded in the session (e.g. `ndx-pose`) no longer blocks
+        every recompute attempt, and `hdmf-common`, `hdmf-experimental` and
+        `ndx-franklab-novela` are compared (the old allowlist spelled them
+        with underscores, so it compared only `core`) #1713
 
 ## [0.6.0] (Sep 1st 2026)
 
