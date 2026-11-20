@@ -43,7 +43,6 @@ from spyglass.spikesorting.v2._storage.recompute import (
     compare_hash_dicts,
     current_env_namespaces,
     current_nwb_namespaces,
-    env_matches,
     hash_extension_data,
 )
 from spyglass.spikesorting.v2._recording.fingerprint import (
@@ -65,6 +64,7 @@ from spyglass.spikesorting.v2.sorting import (
 )
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+from spyglass.utils.nwb_hash import env_matches
 from spyglass.common.common_device import Probe
 from spyglass.common.common_ephys import Electrode
 from spyglass.spikesorting.v2._recording.fingerprint import (
@@ -474,9 +474,10 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         """Restrict to artifacts reproducible in the current environment.
 
         Keeps rows whose shared pynwb namespaces all match the live
-        environment's versions (see
-        :func:`~spyglass.spikesorting.v2._storage.recompute.env_matches`).
-        Restrict ``self`` first to scope the scan.
+        environment's versions (``spyglass.utils.nwb_hash.env_matches``).
+        A pre-filter: the ``content_hash`` match decides deletion, and
+        ``force_attempt`` overrides a false negative. Restrict ``self`` first
+        to scope the scan.
         """
         env_deps = current_env_namespaces()
         pk = self.primary_key

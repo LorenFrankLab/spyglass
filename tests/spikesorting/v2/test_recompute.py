@@ -293,53 +293,6 @@ def test_compare_hash_dicts_all_equal_is_matched():
 # ---------- DB-free env-compatibility logic ---------------------------------
 
 
-def test_env_matches_compatible_on_shared_namespaces():
-    """A file is compatible when every namespace shared with the env agrees."""
-    from spyglass.spikesorting.v2._storage.recompute import env_matches
-
-    env = {
-        "core": "2.9.0",
-        "hdmf-common": "1.8.0",
-        "hdmf-experimental": "0.5.0",
-    }
-    file_deps = {"core": "2.9.0", "hdmf-common": "1.8.0"}
-    assert env_matches(file_deps, env)
-
-
-def test_env_matches_incompatible_on_version_drift():
-    """A drifted version on a shared namespace marks the file incompatible."""
-    from spyglass.spikesorting.v2._storage.recompute import env_matches
-
-    env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
-    assert not env_matches({"core": "0.0.0-incompatible"}, env)
-
-
-def test_env_matches_none_or_empty_deps_is_incompatible():
-    """Deps absent at inventory time can't be confirmed -> incompatible."""
-    from spyglass.spikesorting.v2._storage.recompute import env_matches
-
-    env = {"core": "2.9.0"}
-    assert not env_matches(None, env)
-    assert not env_matches({}, env)
-
-
-def test_env_matches_ignores_namespaces_absent_from_env():
-    """An extension in the file but not registered in the live env (they
-    register lazily) is not compared, as in v1."""
-    from spyglass.spikesorting.v2._storage.recompute import env_matches
-
-    env = {"core": "2.9.0", "hdmf-common": "1.8.0"}
-    file_deps = {"core": "2.9.0", "ndx-franklab-novela": "0.1.0"}
-    assert env_matches(file_deps, env)
-
-
-def test_env_matches_no_shared_namespace_is_incompatible():
-    """No overlap with the env means nothing was verified -> incompatible."""
-    from spyglass.spikesorting.v2._storage.recompute import env_matches
-
-    assert not env_matches({"ndx-only": "1.0.0"}, {"core": "2.9.0"})
-
-
 def test_current_env_namespaces_reports_core_stack():
     """The live-env reader returns the base NWB/HDMF namespace versions."""
     from spyglass.spikesorting.v2._storage.recompute import (

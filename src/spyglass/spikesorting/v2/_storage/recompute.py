@@ -246,24 +246,8 @@ def current_env_namespaces() -> dict:
     """Return the pynwb namespace versions registered in the current process.
 
     Includes extensions loaded so far this session. Compare with
-    :func:`current_nwb_namespaces` via :func:`env_matches`.
+    :func:`current_nwb_namespaces` via ``spyglass.utils.nwb_hash.env_matches``.
     """
     deps = get_namespace_versions(pynwb.get_manager().type_map)
     deps.pop("version", None)
     return deps
-
-
-def env_matches(file_deps: dict | None, env_deps: dict) -> bool:
-    """Whether a file's inventoried namespaces are reproducible in ``env_deps``.
-
-    Compatible iff every shared namespace agrees on version; file-only
-    namespaces (extensions load lazily) are ignored. No deps or no shared
-    namespace is incompatible. This is a pre-filter: the ``content_hash``
-    match decides deletion, and ``force_attempt`` overrides a false negative.
-    """
-    if not file_deps:
-        return False
-    shared = set(file_deps) & set(env_deps)
-    if not shared:
-        return False
-    return all(file_deps[ns] == env_deps[ns] for ns in shared)
