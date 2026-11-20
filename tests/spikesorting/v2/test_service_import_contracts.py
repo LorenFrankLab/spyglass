@@ -10,7 +10,6 @@ contracts are re-exported beside ``run_v2_pipeline``.
 from __future__ import annotations
 
 import ast
-import os
 import subprocess
 import sys
 import textwrap
@@ -32,8 +31,12 @@ _WORKER_MODULES = [
     "_storage.spikeinterface",
 ]
 # Unit-tier tests and the package root's lazy names import the facade with
-# database access blocked.
-_DB_FREE_MODULES = [*_WORKER_MODULES, "pipeline"]
+# database access blocked; v2's NWB writer imports the shared utils.
+_DB_FREE_MODULES = [
+    *(f"spyglass.spikesorting.v2.{name}" for name in _WORKER_MODULES),
+    "spyglass.spikesorting.v2.pipeline",
+    "spyglass.spikesorting.utils",
+]
 _WORKER_BASES = {
     "BaseRecording",
     "BaseRecordingSegment",
@@ -102,7 +105,7 @@ def test_service_module_imports_without_db_layer(modname):
         # Fail before schema activation can connect to a developer's database.
         # Keep attempts as well so catching ImportError cannot hide a violation.
         sys.meta_path.insert(0, RejectSchemaImports())
-        import spyglass.spikesorting.v2.{modname}  # noqa: F401
+        import {modname}  # noqa: F401
 
         leaked = sorted(
             m
@@ -125,37 +128,6 @@ def test_service_module_imports_without_db_layer(modname):
     )
     assert result.returncode == 0, (
         f"{modname} must import without a DB dependency\n"
-        f"stdout={result.stdout}\nstderr={result.stderr}"
-    )
-
-
-def test_shared_spikesorting_utils_imports_without_db_layer():
-    """``spyglass.spikesorting.utils`` imports with no database or schema.
-
-    v2's NWB writer imports ``_get_recording_timestamps`` from it. Catches a
-    module-level ``spyglass.common`` import such as #1438's ``Nwbfile``.
-    """
-    probe = textwrap.dedent("""
-        import sys
-
-        import spyglass.spikesorting.utils  # noqa: F401
-
-        leaked = sorted(m for m in sys.modules if m.startswith("spyglass.common"))
-        assert not leaked, "cold-import pulled in DB-layer modules: " + repr(
-            leaked
-        )
-        """)
-    result = subprocess.run(
-        [sys.executable, "-c", probe],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-        # An unreachable host: declaring any schema would fail the import.
-        env={**os.environ, "DJ_HOST": "no-db.invalid"},
-    )
-    assert result.returncode == 0, (
-        "spyglass.spikesorting.utils must import without a DB dependency\n"
         f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
