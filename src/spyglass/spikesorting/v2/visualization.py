@@ -287,11 +287,9 @@ def plot_sorting_summary(
     if backend is None:
         raise ValueError(
             "plot_sorting_summary has no local matplotlib backend in "
-            "SpikeInterface 0.104.3; SortingSummaryWidget renders only via "
-            f"{' / '.join(supported)} (desktop GUI / web). Pass one explicitly "
-            "(e.g. backend='spikeinterface_gui' for the local SI curation GUI). "
-            "For a local matplotlib view use plot_unit_summary(...) per unit or "
-            "plot_metrics(...) for the metric overview."
+            f"SpikeInterface 0.104.3. Pass backend={' / '.join(supported)}, "
+            "or use plot_unit_summary(...) or plot_metrics(...) for "
+            "matplotlib."
         )
     import spikeinterface.widgets as sw
 

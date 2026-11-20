@@ -852,8 +852,7 @@ class UnitMatch(StagedOutputCleanupMixin, SpyglassMixin, dj.Computed):
                         f"UnitMatch.Pair.insert: endpoint {label} curation "
                         f"(sorting_id={endpoint[0]}, curation_id={endpoint[1]}) "
                         "is not a pinned UnitMatchSelection.Input curation for "
-                        f"unitmatch_id={unitmatch_id}. A pair may only reference "
-                        "units from the selection's pinned curations. Use "
+                        f"unitmatch_id={unitmatch_id}. Use "
                         "UnitMatchSelection.insert_inputs() + populate()."
                     )
             if endpoint_a == endpoint_b:

@@ -677,7 +677,8 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
             source and artifact mask, or the stored source, artifact
             detection and motion correction do not give the stored
             ``sorting_id`` (a row written or edited without
-            :meth:`insert_selection`).
+            :meth:`insert_selection`, whose consumers would read other traces
+            than its sorter did).
         """
         master = cls._stored_row(key)
         lineage = cls.resolve_source(key)
@@ -709,11 +710,9 @@ class SortingSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
         if mismatch is not None:
             raise SchemaBypassError(
                 f"SortingSelection {master['sorting_id']}: its stored source "
-                f"({mismatch}) is not the one it was selected with. The row "
-                "was written or edited without "
-                "SortingSelection.insert_selection, so its consumers would "
-                "read other traces than its sorter did. Drop the selection "
-                "(and its sort) and re-insert it with insert_selection."
+                f"({mismatch}) is not the one it was selected with. Drop the "
+                "selection (and its sort) and re-insert it with "
+                "insert_selection."
             )
         if corrected_id is None:
             row = (_TRACE_TABLES[lineage.kind] & lineage.key).fetch1()
@@ -1745,21 +1744,20 @@ class Sorting(
         Raises
         ------
         ConcatBrainRegionAmbiguousError
-            For a concat sort unless ``allow_anchor_member=True``.
+            For a concat sort unless ``allow_anchor_member=True``: a unit's
+            peak channel maps to one Electrode row per member.
+            ``TrackedUnit.get_unit_brain_regions`` resolves each member's
+            region from its own session.
         """
         source = SortingSelection.resolve_source(key)
         if source.kind == "concatenated_recording":
             if not allow_anchor_member:
                 raise ConcatBrainRegionAmbiguousError(
                     f"Sorting.get_unit_brain_regions: sorting_id "
-                    f"{key['sorting_id']} is concat-backed; the unit peak "
-                    "channel maps to multiple Electrode rows (one per "
-                    "SessionGroup.Member). Pass allow_anchor_member=True "
-                    "to return anchor-member regions, or match a curation of "
-                    "this sort with UnitMatch and use "
-                    "TrackedUnit.get_unit_brain_regions, which resolves each "
-                    "unit's region in every member recording from that "
-                    "member's own session."
+                    f"{key['sorting_id']} is concat-backed. Pass "
+                    "allow_anchor_member=True for anchor-member regions, or "
+                    "match a curation of this sort with UnitMatch and use "
+                    "TrackedUnit.get_unit_brain_regions."
                 )
             resolution = "anchor_member"
         else:

@@ -81,8 +81,10 @@ def assert_artifact_frame_fraction(
 ) -> None:
     """Raise if artifact frames exceed ``_MAX_ARTIFACT_FRAME_FRACTION``.
 
-    Past half the recording this is a misconfigured detector, and the per-frame
-    index array would cost O(n_samples) memory. No-op when ``n_samples <= 0``.
+    Past half the recording this means a misconfigured detector or a
+    valid_times override that keeps almost nothing: too little signal is left
+    to sort, and the per-frame index array would cost O(n_samples) memory.
+    No-op when ``n_samples <= 0``.
     ``context`` prefixes the message.
     """
     if n_samples <= 0:
@@ -95,15 +97,11 @@ def assert_artifact_frame_fraction(
         raise ArtifactFractionExceededError(
             f"{context}{n_artifact_frames} of {n_samples} samples "
             f"({100.0 * n_artifact_frames / n_samples:.1f}%) are artifact "
-            f"frames, exceeding the "
-            f"{100.0 * _MAX_ARTIFACT_FRAME_FRACTION:.0f}% guard. Materializing "
-            "an index per artifact sample would allocate O(n_samples) memory "
-            "and run a correspondingly slow per-frame pass; masking this much "
-            "would also leave too little signal to sort. This indicates a "
-            "misconfigured detector (raise amplitude_threshold_uv / "
-            "zscore_threshold, lower proportion_above_threshold, or reduce "
-            "removal_window_ms) or a valid_times override that keeps almost "
-            "nothing."
+            "frames, over the "
+            f"{100.0 * _MAX_ARTIFACT_FRAME_FRACTION:.0f}% limit. Raise "
+            "amplitude_threshold_uv / zscore_threshold, lower "
+            "proportion_above_threshold, reduce removal_window_ms, or widen "
+            "the valid_times override."
         )
 
 
@@ -573,7 +571,11 @@ def _assert_noise_levels_length(
 def _validate_artifact_intervals(
     recording, valid_times, artifact_detection_id, recording_id
 ):
-    """Validate the interval contract and bounded recording envelope."""
+    """Validate the interval contract and bounded recording envelope.
+
+    Empty ``valid_times`` raise: masking would zero the whole recording and
+    the sort would run over all-zeros.
+    """
     import numpy as np
 
     from spyglass.spikesorting.v2.exceptions import (
@@ -594,11 +596,9 @@ def _validate_artifact_intervals(
         raise EmptyArtifactValidTimesError(
             "Artifact-removed valid_times is empty for "
             f"artifact_detection_id={artifact_detection_id!r}, "
-            f"recording_id={recording_id!r}: the artifact-detection pass kept "
-            "zero seconds of the recording. Masking would zero the "
-            "entire recording and the sort would run over all-zeros. "
-            "Re-run RecordingArtifactDetection with looser thresholds or "
-            "override the artifact-detection selection."
+            f"recording_id={recording_id!r}. Re-run "
+            "RecordingArtifactDetection with looser thresholds or override "
+            "the artifact-detection selection."
         )
     if valid_times.ndim != 2 or valid_times.shape[1] != 2:
         raise ValueError(

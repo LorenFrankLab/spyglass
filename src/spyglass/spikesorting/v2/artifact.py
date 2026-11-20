@@ -339,11 +339,8 @@ class SharedArtifactGroup(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
                 raise ValueError(
                     "SharedArtifactGroup.create_group: members have "
                     "differing exact timestamps (recording_id="
-                    f"{reference_rid!r} and recording_id={rid!r} have "
-                    "non-identical timestamp vectors). Shared artifact "
-                    "detection requires time-aligned recordings; use "
-                    "recordings from the same interval identity or run "
-                    "separate artifact detections."
+                    f"{reference_rid!r} vs {rid!r}). Use recordings from "
+                    "the same interval, or run separate artifact detections."
                 )
             member_dtypes.add(str(rec_obj.get_dtype()))
         if len(member_dtypes) != 1:

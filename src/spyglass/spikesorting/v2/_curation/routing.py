@@ -125,13 +125,11 @@ def classify_and_normalize_restriction(
         elif "artifact_detection_id" not in key:
             # Warn rather than silently return unrestricted ids.
             unresolved_name_warning = (
-                "CurationV2.resolve_restriction: "
-                "restrict_by_artifact=True but interval_list_name "
+                "CurationV2.resolve_restriction: interval_list_name "
                 f"{key['interval_list_name']!r} is not an "
-                "'artifact_detection_{uuid}' interval and no "
-                "artifact_detection_id was given; v2 results will NOT be "
-                "artifact-restricted. Pass artifact_detection_id=... or "
-                "use the artifact-detection interval to restrict."
+                "'artifact_detection_{uuid}' interval, so v2 results will "
+                "NOT be artifact-restricted. Pass artifact_detection_id to "
+                "restrict."
             )
 
     # A malformed id fails here rather than matching nothing.

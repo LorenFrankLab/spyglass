@@ -383,15 +383,11 @@ def rebuild_motion_corrected_artifact(table, key) -> None:
         )
         if stale:
             raise RecordingContentDriftError(
-                "MotionCorrectedRecording._rebuild_nwb_artifact: the "
-                f"corrected recording file {analysis_file_name!r} is "
-                "missing and cannot be rebuilt: its selection is stale "
-                f"({'; '.join(stale)}), so reapplying the saved motion "
-                "would not reproduce the stored traces. Restore the file "
-                "from a backup, or delete this MotionCorrectedRecording "
-                "row and everything made from it (sorts, curations) and "
-                "repopulate them from a new "
-                "MotionCorrectedRecordingSelection."
+                "MotionCorrectedRecording._rebuild_nwb_artifact: file "
+                f"{analysis_file_name!r} is missing and cannot be rebuilt "
+                f"from a stale selection ({'; '.join(stale)}). Restore it "
+                "from a backup, or delete this row and its downstream sorts, "
+                "then repopulate from a new MotionCorrectedRecordingSelection."
             )
         computed = table.make_compute(
             master_key,

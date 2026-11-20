@@ -459,11 +459,8 @@ class MotionEstimateSelection(
             raise SchemaBypassError(
                 f"MotionEstimateSelection {master['motion_estimate_id']}: its "
                 f"stored source ({mismatch}) is not the one it was selected "
-                "with. The row was written or edited without "
-                "MotionEstimateSelection.insert_selection, so the estimate "
-                "would describe another mask or source than the one "
-                "selected. Drop the selection (and everything made from it) "
-                "and re-insert it with insert_selection."
+                "with. Drop the selection (and everything made from it) and "
+                "re-insert it with insert_selection."
             )
         return lineage
 

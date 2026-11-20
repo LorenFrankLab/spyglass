@@ -635,11 +635,8 @@ def run_clusterless_thresholder(
             "clusterless_thresholder: detect_threshold="
             f"{params.get('detect_threshold')} with threshold_unit='mad' "
             "and no noise_levels is an implausibly large MAD multiplier "
-            f"(> {_MAX_PLAUSIBLE_MAD_MULTIPLIER}); SpikeInterface would "
-            "estimate per-channel MAD and detect almost nothing. Use "
-            "threshold_unit='uv' for a microvolt/native threshold, or a "
-            "MAD multiplier near 5. (This row likely bypassed the "
-            "SorterParameters insert validator via update1.)"
+            f"(> {_MAX_PLAUSIBLE_MAD_MULTIPLIER}). Fix the stored params "
+            "row: use threshold_unit='uv', or a MAD multiplier near 5."
         )
     nl_in = _clusterless_noise_levels(
         params.get("noise_levels"), threshold_unit

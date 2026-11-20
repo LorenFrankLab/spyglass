@@ -146,11 +146,9 @@ class QualityMetricParamsSchema(BaseModel):
         if renamed:
             raise ValueError(
                 f"Quality metric name(s) {renamed} were removed in "
-                "SpikeInterface 0.104: nn_isolation / nn_noise_overlap are now "
-                "the two output COLUMNS of the single metric 'nn_advanced'. "
-                "Request 'nn_advanced' in metric_names (with "
-                "skip_pc_metrics=False), then threshold the 'nn_noise_overlap' "
-                "column in an AutoCurationRules rule."
+                "SpikeInterface 0.104; they are now columns of 'nn_advanced'. "
+                "Request 'nn_advanced' with skip_pc_metrics=False and "
+                "threshold its 'nn_noise_overlap' column."
             )
         available = _available_quality_metric_names()
         unknown = sorted(name for name in names if name not in available)

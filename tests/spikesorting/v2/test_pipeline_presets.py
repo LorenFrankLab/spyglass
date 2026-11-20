@@ -1652,7 +1652,7 @@ def test_register_pipeline_preset_refuses_unmapped_preprocessing_row(
     dj_conn, clone_env
 ):
     """A preset whose preprocessing row has no analyzer windows is refused at
-    registration, with the mapping insert to run; nothing is saved."""
+    registration, naming the mapping table; nothing is saved."""
     from spyglass.spikesorting.v2.exceptions import (
         UnmappedPreprocessingWaveformsError,
     )
@@ -1663,7 +1663,7 @@ def test_register_pipeline_preset_refuses_unmapped_preprocessing_row(
     _insert_unmapped_preprocessing_row(row)
     with pytest.raises(
         UnmappedPreprocessingWaveformsError,
-        match=r"PreprocessingWaveformParameters\.insert1",
+        match="Insert a PreprocessingWaveformParameters row",
     ):
         register_pipeline_preset(
             preset, _spec_with(preprocessing_params_name=row)

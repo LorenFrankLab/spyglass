@@ -1327,7 +1327,7 @@ recording the first time a process uses it.
     (`waveform_params_for_preprocessing`). The hippocampus and cortex rows map
     to their own pair; `"default"`, the Neuropixels row and `"no_filter"` map to
     the cortex pair. Any other row needs a `PreprocessingWaveformParameters`
-    row, else `UnmappedPreprocessingWaveformsError` gives the `insert1` to run.
+    row, else `UnmappedPreprocessingWaveformsError` names the shipped pairs.
     `clone_pipeline_preset` writes that row for a cloned preprocessing row.
 - The Kilosort4 row (`KS4_NEUROPIXELS`) matches the AIND kilosort4 capsule. Its
     one scientific change from stock KS4 is non-rigid drift correction

@@ -139,12 +139,9 @@ def assert_members_share_electrode_space(members: list[dict]) -> None:
                 f"(index {member['member_index']}, "
                 f"sort_group_id={member['sort_group_id']}, "
                 f"nwb_file_name={member['nwb_file_name']!r}) maps to a "
-                "different electrode space than the anchor member (index "
-                f"{anchor['member_index']}): its sort group's electrode "
-                "ids/brain regions differ. Concatenated members must share the "
-                "same physical electrodes so the result reads correctly in the "
-                "anchor frame -- check that every member uses the same sort "
-                "group / probe layout."
+                "different electrode space than anchor member "
+                f"{anchor['member_index']}. Use the same sort group / probe "
+                "layout for every member."
             )
 
 

@@ -756,7 +756,7 @@ def test_preflight_fails_an_unmapped_preprocessing_row(
     preflight_inputs, monkeypatch
 ):
     """A preset whose preprocessing row has no analyzer-window mapping fails
-    preflight with the mapping insert, before any sort runs."""
+    preflight naming the mapping table, before any sort runs."""
     import spyglass.spikesorting.v2._orchestration.presets as presets_mod
     from spyglass.spikesorting.v2.recording import PreprocessingParameters
 
@@ -788,8 +788,8 @@ def test_preflight_fails_an_unmapped_preprocessing_row(
         c for c in report.checks if c.name == "preprocessing_waveforms_mapped"
     ]
     assert check.ok is False
-    assert f"'preprocessing_params_name': '{row}'" in check.fix
-    assert "PreprocessingWaveformParameters.insert1(" in check.fix
+    assert f"preprocessing_params_name '{row}'" in check.fix
+    assert "Insert a PreprocessingWaveformParameters row" in check.fix
 
 
 @pytest.mark.database

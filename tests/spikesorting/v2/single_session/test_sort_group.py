@@ -92,7 +92,9 @@ def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
     _clean_session_v2(polymer_smoke_session)
     SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
-    with pytest.raises(ValueError, match="silently extend"):
+    with pytest.raises(
+        ValueError, match="Pass explicit non-overlapping sort_group_ids"
+    ):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
 

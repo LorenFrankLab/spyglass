@@ -201,13 +201,9 @@ def _check_zscore_detector(validated, n_channels, n_required, context):
     if n_channels < 3:
         if z_only:
             raise InsufficientZScoreChannelsError(
-                "Artifact detection: zscore_threshold is the only detector on a "
-                f"{n_channels}-channel recording{context}, but the cross-channel "
-                "z-score is amplitude-sensitive only with >= 3 channels (on 1 "
-                "channel it is identically zero; on 2 it is a constant +/-1 for "
-                "any two distinct values), so it would not detect artifacts by "
-                "amplitude. Use amplitude_threshold_uv for 1-2 channel sort "
-                "groups."
+                "Artifact detection: zscore_threshold needs >= 3 channels, got "
+                f"{n_channels}{context}. For 1-2 channels, use "
+                "amplitude_threshold_uv."
             )
         logger.warning(
             "Artifact detection: zscore_threshold is inert on a "
@@ -386,13 +382,10 @@ def detect_artifacts(recording, validated, context="", job_kwargs=None):
     ]
     if not kept:
         logger.warning(
-            "Artifact detection: after removing artifacts and dropping "
-            f"intervals shorter than min_length_s={validated.min_length_s}, "
-            f"NO valid time remains{context}. The sorter will reject this "
-            "recording (EmptyArtifactValidTimesError). Loosen the thresholds "
-            "(amplitude_threshold_uv / zscore_threshold / "
-            "proportion_above_threshold), reduce removal_window_ms, or lower "
-            "min_length_s."
+            f"Artifact detection: no valid time remains{context} after "
+            "removing artifacts and intervals shorter than "
+            f"min_length_s={validated.min_length_s}. Loosen the thresholds, "
+            "reduce removal_window_ms, or lower min_length_s."
         )
         return np.empty((0, 2))
     return np.asarray(kept)

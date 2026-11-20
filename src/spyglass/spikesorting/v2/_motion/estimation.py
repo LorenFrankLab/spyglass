@@ -887,6 +887,9 @@ def build_estimation_clock(
         if a timestamp or the cap is not finite (or the cap is negative); if a
         span ends before it starts; or if a span starts at or before the
         previous span's last timestamp (overlapping or out-of-order spans).
+        All spans share one acquisition clock, so concatenation members on
+        independent clocks (e.g. each starting at 0) or out of acquisition
+        order fail here.
     """
     spans = np.asarray(spans, dtype=np.int64).reshape(-1, 2)
     starts = np.asarray(source_start_s, dtype=np.float64).reshape(-1)
@@ -939,13 +942,8 @@ def build_estimation_clock(
                 f"Estimation clock: continuity span {i + 1} (frames "
                 f"{spans[i + 1].tolist()}) starts at {starts[i + 1]!r} s, "
                 f"at or before span {i}'s last timestamp ({ends[i]!r} s; "
-                f"frames {spans[i].tolist()}). Motion estimation places all "
-                "spans on one acquisition clock, so their timestamps must "
-                "increase across spans. For a concatenation, the members' "
-                "clocks may be independent (for example each starting at 0 "
-                "in a different NWB file) or the members may be out of "
-                "acquisition order; concatenate members that share one "
-                "clock, in acquisition order."
+                f"frames {spans[i].tolist()}). For a concatenation, use "
+                "members that share one clock, in acquisition order."
             )
         gap = max(gap, 0.0)
         estimation.append(estimation[-1] + duration + min(gap, max_gap_s))

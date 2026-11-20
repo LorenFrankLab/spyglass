@@ -108,12 +108,9 @@ def fetch_sorting_inputs(key) -> SortingFetched:
         raise SchemaBypassError(
             "Sorting.make_fetch: concat source for sorting_id="
             f"{key.get('sorting_id')!r} carries artifact_detection_id="
-            f"{sel_row['artifact_detection_id']!r}, but a concat sort "
-            "owns its member masks through ConcatenatedRecordingSelection. "
-            "The row was written without SortingSelection.insert_selection "
-            "(schema bypass) and its detection cannot describe all concat "
-            "members. Drop the selection and re-create it via "
-            "insert_selection."
+            f"{sel_row['artifact_detection_id']!r}, but concat members carry "
+            "their own masks. Drop the selection and re-create it via "
+            "SortingSelection.insert_selection."
         )
 
     anchor = resolve_sort_anchor(source)

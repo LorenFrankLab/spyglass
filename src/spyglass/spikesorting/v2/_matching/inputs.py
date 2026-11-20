@@ -600,11 +600,9 @@ def _check_input_curation(sorting_id, curation_id, exc_class) -> None:
     if CurationV2.has_unapplied_proposed_merges(key):
         raise exc_class(
             f"UnitMatchSelection: input {_input_label(sorting_id, curation_id)} "
-            "pins a curation with proposed merges that are NOT applied "
-            "(apply_merge=False); matching unmerged (oversplit) units across "
-            "sessions is wrong. Apply or drop the proposed merges first "
-            "(CurationV2.insert_curation(..., apply_merge=True)) before adding "
-            "the curation to a UnitMatch selection."
+            "pins a curation whose proposed merges are NOT applied "
+            "(apply_merge=False). Apply or drop them first, e.g. "
+            "CurationV2.insert_curation(..., apply_merge=True)."
         )
 
 

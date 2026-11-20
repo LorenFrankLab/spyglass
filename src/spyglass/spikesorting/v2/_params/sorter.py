@@ -219,9 +219,7 @@ class ClusterlessThresholderSchema(BaseModel):
                 "ClusterlessThresholderSchema: detect_threshold="
                 f"{self.detect_threshold} with threshold_unit='mad' and no "
                 "noise_levels is an implausibly large MAD multiplier (> "
-                f"{_MAX_PLAUSIBLE_MAD_MULTIPLIER}); SpikeInterface would "
-                "estimate per-channel MAD and detect almost nothing. Use "
-                "threshold_unit='uv' for a microvolt/native-unit threshold, "
+                f"{_MAX_PLAUSIBLE_MAD_MULTIPLIER}). Use threshold_unit='uv', "
                 "or a MAD multiplier near 5."
             )
         return self
@@ -316,12 +314,9 @@ class SorterExecutionParamsSchema(BaseModel):
             ):
                 raise ValueError(
                     f"SorterExecutionParamsSchema: backend={self.backend!r} "
-                    "requires a non-empty container_image string (a Docker "
-                    "image name/tag/digest, or a local .sif path for "
-                    f"Singularity); got {self.container_image!r}. "
-                    "SpikeInterface's docker_image=True / singularity_image=True "
-                    "is not accepted as tracked provenance -- pin an explicit "
-                    "image."
+                    "requires a non-empty container_image string; got "
+                    f"{self.container_image!r}. Pin a Docker image "
+                    "name/tag/digest or a Singularity .sif path."
                 )
             if (
                 self.installation_mode in ("pypi", "github")
@@ -329,12 +324,9 @@ class SorterExecutionParamsSchema(BaseModel):
             ):
                 raise ValueError(
                     "SorterExecutionParamsSchema: installation_mode="
-                    f"{self.installation_mode!r} installs SpikeInterface into "
-                    "the container at run time and so requires an explicit "
-                    "spikeinterface_version (otherwise the install floats with "
-                    "the host environment and the row is not reproducible by "
-                    "content). Pin spikeinterface_version, or use "
-                    "installation_mode='no-install' with a baked image."
+                    f"{self.installation_mode!r} requires an explicit "
+                    "spikeinterface_version. Pin spikeinterface_version, or "
+                    "use installation_mode='no-install' with a baked image."
                 )
         return self
 

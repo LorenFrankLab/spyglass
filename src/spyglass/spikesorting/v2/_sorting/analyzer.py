@@ -417,10 +417,7 @@ def _load_analyzer_folder_or_rebuild(
                 raise AnalyzerFolderMissingError(
                     "Sorting.get_analyzer(rebuild=False): analyzer folder for "
                     f"sorting_id={sorting_id!r}, recipe={recipe_label!r} is "
-                    f"absent ({folder}). The regeneratable analyzer cache was "
-                    "removed out of band; the no-rebuild loader surfaces the "
-                    "missing state for the recompute audit instead of "
-                    "rebuilding. Use the default rebuild=True path to "
+                    f"absent ({folder}). Use the default rebuild=True to "
                     "reconstruct it."
                 )
             rebuild_fn()

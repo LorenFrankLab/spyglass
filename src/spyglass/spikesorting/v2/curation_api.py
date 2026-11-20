@@ -1694,13 +1694,11 @@ class RunResult(dict):
             return
         logger.warning(
             f"start_review: review profile {resolved.review_profile_name!r} "
-            f"scores with metric_params_name={spec.metric_params_name!r} and "
-            "auto_curation_rules_name="
-            f"{spec.auto_curation_rules_name!r}, but pipeline_preset "
-            f"{preset_name!r} auto-labeled this run with "
-            f"{preset.metric_params_name!r} and "
-            f"{preset.auto_curation_rules_name!r}. The review shows the "
-            "profile's verdicts, which can differ from the auto-labels. Call "
+            f"uses metric/rules ({spec.metric_params_name!r}, "
+            f"{spec.auto_curation_rules_name!r}), but pipeline_preset "
+            f"{preset_name!r} auto-labeled with "
+            f"({preset.metric_params_name!r}, "
+            f"{preset.auto_curation_rules_name!r}). Call "
             "describe_review_profiles() to pick a matching profile."
         )
 

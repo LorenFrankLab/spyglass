@@ -171,11 +171,9 @@ def assert_displayed_unit_properties_available(
     if missing:
         raise FigPackDisplayedUnitPropertyError(
             "FigPackCuration cannot display requested unit properties "
-            f"{missing}; available properties on this sort's display analyzer "
-            f"are {available}. `displayed_unit_properties=None` keeps "
-            "SpikeInterface's default display behavior; otherwise compute the "
-            "needed analyzer metric/template/property columns before building "
-            "the FigPack view."
+            f"{missing}; the display analyzer has {available}. Pass "
+            "displayed_unit_properties=None for the defaults, or compute "
+            "the missing analyzer columns first."
         )
 
 

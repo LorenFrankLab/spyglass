@@ -995,7 +995,11 @@ def _metric_unit_ids(index):
 
 
 def assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
-    """Raise unless the metric index equals the curation's unit set."""
+    """Raise unless the metric index equals the curation's unit set.
+
+    Metrics must score the evaluated curation's own units (e.g. the merged
+    set), not the raw-sort analyzer.
+    """
     computed_ids = _metric_unit_ids(metrics_df.index)
     expected_ids = integer_vector(
         list(expected_unit_ids), name="expected unit_id"
@@ -1010,10 +1014,8 @@ def assert_unit_namespace(metrics_df, expected_unit_ids) -> None:
         raise ValueError(
             "CurationEvaluation namespace invariant violated: computed "
             f"metric unit ids {sorted(computed)} != the curation's unit set "
-            f"{sorted(expected)}. The metrics must be scored over the "
-            "evaluated curation's own units (e.g. the merged unit set), not "
-            "the raw-sort analyzer; this indicates a stale temp analyzer or "
-            "accidental raw-analyzer reuse."
+            f"{sorted(expected)}, likely from a stale temp analyzer or the "
+            "raw-sort analyzer."
         )
 
 

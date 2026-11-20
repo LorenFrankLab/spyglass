@@ -1475,12 +1475,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
             return
         where = f"{context}: " if context else ""
         raise ValueError(
-            f"{where}curation {dict(key)} is a preview/draft curation "
-            "(apply_merge=False with a proposed merge group that has not been "
-            "applied), not a committed curation state. Evaluating it would "
-            "score the UNMERGED preview units instead of the final merged unit "
-            "set. Commit the merge first (commit_merges / "
-            "insert_curation(apply_merge=True)), then evaluate that curation."
+            f"{where}curation {dict(key)} is a preview/draft curation with "
+            "unapplied proposed merges. Commit the merge first (commit_merges "
+            "/ insert_curation(apply_merge=True)), then evaluate that "
+            "curation."
         )
 
     @classmethod
@@ -1704,6 +1702,8 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
         ------
         ConcatBrainRegionAmbiguousError
             For a concat-backed sorting unless ``allow_anchor_member=True``.
+            ``TrackedUnit.get_unit_brain_regions`` resolves each member's
+            region from its own session.
         """
         source = SortingSelection.resolve_source(
             {"sorting_id": key["sorting_id"]}
@@ -1712,12 +1712,10 @@ class CurationV2(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
             if not allow_anchor_member:
                 raise ConcatBrainRegionAmbiguousError(
                     f"CurationV2.get_unit_brain_regions: sorting_id "
-                    f"{key['sorting_id']} is concat-backed; pass "
+                    f"{key['sorting_id']} is concat-backed. Pass "
                     "allow_anchor_member=True for anchor-only regions, or match "
                     "this curation with UnitMatch and use "
-                    "TrackedUnit.get_unit_brain_regions, which resolves each "
-                    "unit's region in every member recording from that "
-                    "member's own session."
+                    "TrackedUnit.get_unit_brain_regions."
                 )
             resolution = "anchor_member"
         else:

@@ -249,7 +249,7 @@ def test_ambient_seed_rejected_then_records_clusterless_provenance(
     sort_pk = _setup_clusterless_smoke_sort("mearec_provenance_ambient.nwb")
 
     dj.config["custom"]["spikesorting_v2_job_kwargs"] = {"random_seed": 7}
-    with pytest.raises(ValueError, match="random_seed to live in the"):
+    with pytest.raises(ValueError, match="ambient random_seed=7"):
         Sorting.populate(sort_pk, reserve_jobs=False)
     # The rejected sort wrote no row (the seed check runs first in make_compute).
     assert len(Sorting & sort_pk) == 0

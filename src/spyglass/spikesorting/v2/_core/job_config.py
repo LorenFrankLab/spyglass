@@ -101,12 +101,9 @@ def _resolved_job_kwargs(*row_job_kwargs: dict | None) -> dict:
 def _warn_ambient_seed_once(seed: int) -> None:
     """Emit the ambient-seed warning at most once per distinct seed value."""
     logger.warning(
-        "spikesorting v2: random_seed=%s is supplied via the ambient "
-        "SI-global / dj.config['custom']['spikesorting_v2_job_kwargs'] layer, "
-        "not a per-row job_kwargs blob. It is used and recorded as the "
-        "effective seed, but an ambient seed is process-global rather than "
-        "pinned to a parameter row, so the run is harder to reproduce. Prefer "
-        "setting random_seed in the per-row job_kwargs.",
+        "spikesorting v2: random_seed=%s comes from the ambient SI-global / "
+        "dj.config['custom']['spikesorting_v2_job_kwargs'] layer, not a "
+        "parameter row. Set random_seed in the row's job_kwargs.",
         seed,
     )
 
@@ -130,7 +127,8 @@ def resolve_effective_seed(
     reject_ambient_seed : bool, optional
         Raise instead of warning on an ambient-only ``random_seed``. The sorting
         stage passes this because an ambient seed is absent from
-        ``sorting_id``. Default ``False``.
+        ``sorting_id``, so a later seed change would silently reuse the sort.
+        Default ``False``.
 
     Returns
     -------
@@ -167,15 +165,10 @@ def resolve_effective_seed(
         if "random_seed" in ambient:
             if reject_ambient_seed:
                 raise ValueError(
-                    "spike sorting requires random_seed to live in the "
-                    "SorterParameters job_kwargs (where it is part of the "
-                    "sort's identity via sorter_params_name), not the ambient "
-                    "dj.config['custom']['spikesorting_v2_job_kwargs'] / "
-                    "SI-global layer. An ambient random_seed="
-                    f"{int(ambient['random_seed'])} changes the sort output "
-                    "WITHOUT changing sorting_id, so a later seed change would "
-                    "silently reuse this sort. Move random_seed into the "
-                    "SorterParameters row (or clear the ambient seed)."
+                    "spike sorting: ambient random_seed="
+                    f"{int(ambient['random_seed'])} (SI-global / dj.config) "
+                    "is not part of sorting_id. Move random_seed into the "
+                    "SorterParameters job_kwargs, or clear the ambient seed."
                 )
             _warn_ambient_seed_once(int(ambient["random_seed"]))
     return effective

@@ -202,12 +202,8 @@ def validate_parent_or_reuse_root(
             raise ValueError(
                 f"CurationV2.insert_curation: parent_curation_id="
                 f"{parent_curation_id} (sorting_id={sorting_id}) is a "
-                "preview/draft curation (apply_merge=False with an "
-                "unapplied proposed merge); a child cannot branch from a "
-                "preview. Commit the proposed merge first "
-                "(commit_merges / insert_curation(apply_merge=True)) or "
-                "discard the preview, then branch from the "
-                "committed curation."
+                "preview/draft curation. Commit its merge (commit_merges) "
+                "and branch from the committed curation."
             )
     else:
         # Reuse an existing root; order_by picks the lowest id if several.
@@ -229,13 +225,11 @@ def validate_parent_or_reuse_root(
                 or curation_source_changed
             ) and not reuse_existing:
                 raise ValueError(
-                    "CurationV2.insert_curation: a root curation "
-                    f"already exists for sorting_id={sorting_id}, but "
-                    "you passed labels / merge_groups / description / "
-                    "apply_merge / curation_source that would be silently "
-                    "ignored. Pass reuse_existing=True to reuse the "
-                    "existing root, or curate as a child with "
-                    "parent_curation_id=<existing root curation_id>."
+                    "CurationV2.insert_curation: a root curation already "
+                    f"exists for sorting_id={sorting_id}, so the passed "
+                    "curation inputs would be ignored. Pass "
+                    "reuse_existing=True, or curate a child with "
+                    "parent_curation_id=<root curation_id>."
                 )
             ignored = _inputs_differing_from_root(
                 table_cls,

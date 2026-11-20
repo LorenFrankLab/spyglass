@@ -42,8 +42,9 @@ def handle_existing(
 ) -> None:
     """Enforce the inspect-before-destroy contract.
 
-    A rerun is refused unless the caller passes explicit non-overlapping
-    ``sort_group_ids`` or ``delete_existing_entries=True, confirm=True``.
+    A rerun is refused, since it would silently extend the sort-group set,
+    unless the caller passes explicit non-overlapping ``sort_group_ids`` or
+    ``delete_existing_entries=True, confirm=True``.
     Auto-allocation is allowed only on a session's first call.
     ``table_cls`` is ``SortGroupV2``.
     """
@@ -71,12 +72,10 @@ def handle_existing(
     if not delete_existing_entries:
         if not explicit_sort_group_ids:
             raise ValueError(
-                f"SortGroupV2 already has rows for {nwb_file_name!r}; "
-                "rerunning without an override would silently extend "
-                "the sort-group set. Either pass explicit non-"
-                "overlapping sort_group_ids to opt into an additive "
-                "insert, or set delete_existing_entries=True, "
-                "confirm=True after reviewing "
+                f"SortGroupV2 already has rows for {nwb_file_name!r}. "
+                "Pass explicit non-overlapping sort_group_ids to add "
+                "groups, or set delete_existing_entries=True, confirm=True "
+                "after reviewing "
                 f"SortGroupV2.preview_existing_entries({nwb_file_name!r})."
             )
         existing_ids = set(existing.fetch("sort_group_id"))

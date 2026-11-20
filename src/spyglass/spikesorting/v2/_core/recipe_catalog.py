@@ -435,7 +435,9 @@ def waveform_params_for_preprocessing(
     """Return the ``(display, metric)`` waveform-params row names for a recipe.
 
     Shipped rows map in code; any other row needs its
-    ``PreprocessingWaveformParameters`` row.
+    ``PreprocessingWaveformParameters`` row, matched to its high-pass
+    (hippocampus 0.5/0.5 ms, cortex 1.0/2.0 ms). ``clone_pipeline_preset``
+    writes that row for a preprocessing row it derives.
 
     Parameters
     ----------
@@ -451,7 +453,7 @@ def waveform_params_for_preprocessing(
     ------
     UnmappedPreprocessingWaveformsError
         If the row is not shipped and has no ``PreprocessingWaveformParameters``
-        row; the message holds the insert to run.
+        row; the message names the shipped pairs to insert.
     """
     if preprocessing_params_name in _PREPROC_WAVEFORM_PARAMS:
         return _PREPROC_WAVEFORM_PARAMS[preprocessing_params_name]
@@ -471,22 +473,11 @@ def waveform_params_for_preprocessing(
 
     raise UnmappedPreprocessingWaveformsError(
         "No analyzer waveform windows are mapped for "
-        f"preprocessing_params_name {preprocessing_params_name!r}. v2 picks "
-        "the display and metric waveform windows by preprocessing row, so a "
-        "custom row needs a PreprocessingWaveformParameters row. Insert the "
-        "pair matching its high-pass:\n"
-        "  from spyglass.spikesorting.v2.sorting import "
-        "PreprocessingWaveformParameters\n"
-        "  PreprocessingWaveformParameters.insert1({"
-        f"'preprocessing_params_name': {preprocessing_params_name!r}, "
-        f"'display_waveform_params_name': {HIPPOCAMPUS_DISPLAY_WAVEFORMS!r}, "
-        f"'metric_waveform_params_name': {HIPPOCAMPUS_METRIC_WAVEFORMS!r}"
-        "})\n"
-        "Shipped pairs: hippocampus 0.5/0.5 ms "
-        f"({HIPPOCAMPUS_DISPLAY_WAVEFORMS} + {HIPPOCAMPUS_METRIC_WAVEFORMS}); "
-        f"cortex 1.0/2.0 ms ({CORTEX_DISPLAY_WAVEFORMS} + "
-        f"{CORTEX_METRIC_WAVEFORMS}). clone_pipeline_preset writes this row "
-        "when it derives a preprocessing row."
+        f"preprocessing_params_name {preprocessing_params_name!r}. Insert a "
+        "PreprocessingWaveformParameters row for it with a shipped pair: "
+        f"hippocampus ({HIPPOCAMPUS_DISPLAY_WAVEFORMS}, "
+        f"{HIPPOCAMPUS_METRIC_WAVEFORMS}) or cortex "
+        f"({CORTEX_DISPLAY_WAVEFORMS}, {CORTEX_METRIC_WAVEFORMS})."
     )
 
 

@@ -76,7 +76,10 @@ def resolve_snapshot_recordings(snapshot_rows):
     """Verify each FROZEN member's ``Recording`` and build the load plan.
 
     Each member's ``recording_id`` must still exist with its frozen
-    ``content_hash``. No SI/NWB I/O, and never calls ``Recording.populate``.
+    ``content_hash``, so the concat is built from the data its id was minted
+    for. Re-running ``insert_selection`` re-snapshots the members under a new
+    ``concat_recording_id``. No SI/NWB I/O, and never calls
+    ``Recording.populate``.
 
     Parameters
     ----------
@@ -147,20 +150,15 @@ def resolve_snapshot_recordings(snapshot_rows):
         raise MissingRecordingForConcatError(
             "ConcatenatedRecording.make: "
             f"{len(missing)} frozen member Recording row(s) are gone: "
-            f"{missing}. The member set was frozen at insert_selection; "
-            "restore the missing Recording(s), or DELETE this concat and "
-            "re-run ConcatenatedRecordingSelection.insert_selection (which "
-            "re-snapshots and mints a new concat_recording_id). Run "
-            "Recording.populate(...) for each missing key first."
+            f"{missing}. Restore them with Recording.populate(...), or delete "
+            "this concat and re-run insert_selection."
         )
     if drifted:
         raise ConcatMemberDriftError(
             "ConcatenatedRecording.make: "
-            f"{len(drifted)} frozen member(s) have a Recording whose current "
-            f"content_hash no longer matches the snapshot: {drifted}. The "
-            "concatenation would be built from different underlying data than "
-            "concat_recording_id was minted for. Restore the original member "
-            "recording content, or DELETE this concat and re-run "
-            "insert_selection to mint a new concat for the changed inputs."
+            f"{len(drifted)} frozen member(s) have a Recording whose "
+            f"content_hash no longer matches the snapshot: {drifted}. Restore "
+            "the original content, or delete this concat and re-run "
+            "insert_selection."
         )
     return member_plan

@@ -193,7 +193,7 @@ def test_every_shipped_preprocessing_row_maps_waveform_windows():
 
 
 def test_unmapped_preprocessing_row_raises_with_the_mapping_insert(dj_conn):
-    """A custom row with no mapping is refused with a copy-paste insert and
+    """A custom row with no mapping is refused, naming the mapping table and
     both shipped pairs, never silently given the cortex windows."""
     from spyglass.spikesorting.v2.exceptions import (
         UnmappedPreprocessingWaveformsError,
@@ -203,7 +203,7 @@ def test_unmapped_preprocessing_row_raises_with_the_mapping_insert(dj_conn):
         waveform_params_for_preprocessing("lab_unmapped_recipe_2026_11")
     message = str(raised.value)
     assert "'lab_unmapped_recipe_2026_11'" in message
-    assert "PreprocessingWaveformParameters.insert1(" in message
+    assert "Insert a PreprocessingWaveformParameters row" in message
     for name in (
         "franklab_hippocampus_actual_waveforms",
         "franklab_hippocampus_metric_waveforms",

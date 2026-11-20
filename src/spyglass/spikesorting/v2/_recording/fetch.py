@@ -326,6 +326,9 @@ def assert_recording_inputs_current(
 
     The one live-versus-stored comparison: ``Recording.make_fetch``, the
     recompute delete gate and ``audit_recording_input_hashes`` all use it.
+    The hash covers the electrode membership, reference, interpolated bad
+    channels, and the sort interval / raw valid times. Re-running
+    ``insert_selection`` mints a new ``recording_id`` for changed inputs.
 
     Parameters
     ----------
@@ -358,13 +361,10 @@ def assert_recording_inputs_current(
     if live_input_hash != stored_input_hash:
         raise RecordingInputDriftError(
             f"Recording {sel['recording_id']} was selected with input "
-            f"fingerprint {stored_input_hash} but the live inputs now hash "
-            f"to {live_input_hash}: the electrode membership, reference, "
-            "interpolate bad-channel set, or the sort interval / raw valid "
-            "times it is cut to changed after insert_selection. Re-run "
-            "insert_selection for the current inputs (it mints a new "
-            "recording_id for the changed set), or restore the sort group "
-            "or IntervalList."
+            f"fingerprint {stored_input_hash}, but its live sort group or "
+            f"intervals now hash to {live_input_hash}. Re-run "
+            "insert_selection for the current inputs, or restore the sort "
+            "group or IntervalList."
         )
     return resolved
 

@@ -406,10 +406,9 @@ def _reject_duplicate_fingerprints(
                 raise DuplicateParameterContentError(
                     f"{table_name}: a row named {name!r} already exists with "
                     f"different content (stored {existing[:12]}, new "
-                    f"{row_fingerprint[:12]}). Parameter rows are immutable "
-                    "and downstream ids use the name, so the stored content "
-                    "would be used. Insert the new parameters under a new "
-                    f"name, or delete {name!r} first if nothing depends on it."
+                    f"{row_fingerprint[:12]}). Insert the new parameters "
+                    f"under a new name, or delete {name!r} first if nothing "
+                    "depends on it."
                 )
             continue
         fingerprint_by_pk[pk(row)] = row_fingerprint

@@ -640,7 +640,8 @@ def assert_unique_contact_positions(
     Checks ``get_channel_locations()``, the geometry
     ``create_sorting_analyzer`` will see, so run it last. With
     ``require_2d``, 3D locations are refused here rather than later in the
-    artifact writer.
+    artifact writer. A reference channel that takes part in plane selection
+    and is dropped afterwards can leave a group 3D.
 
     Parameters
     ----------
@@ -673,11 +674,8 @@ def assert_unique_contact_positions(
     ):
         raise ValueError(
             "Recording.make: this recording still carries 3D channel "
-            "locations; normalize them to a 2D plane before the artifact is "
-            "written (normalize_channel_locations). Check Probe.Electrode "
-            "rel_x/rel_y/rel_z for this sort group -- a reference channel "
-            "that takes part in plane selection and is dropped afterwards can "
-            "leave the group unnormalized."
+            "locations, not a 2D plane. Check Probe.Electrode "
+            "rel_x/rel_y/rel_z for this sort group."
         )
     positions = np.asarray(recording.get_channel_locations(), dtype=float)
     if len(positions) > 1 and not _all_rows_distinct(positions):

@@ -176,7 +176,9 @@ def plan_concat_selection(
     """Validate a concat selection request and freeze its member snapshot.
 
     The validation half of ``ConcatenatedRecordingSelection.insert_selection``
-    (see its docstring for the request fields and errors).
+    (see its docstring for the request fields and errors). Every member needs
+    a populated ``Recording``; a member whose sort group changed needs a new
+    one.
 
     Parameters
     ----------
@@ -295,13 +297,11 @@ def plan_concat_selection(
         )
     if missing:
         raise MissingRecordingForConcatError(
-            "ConcatenatedRecordingSelection.insert_selection requires "
-            "every member's Recording to be populated under "
-            f"preprocessing_params_name={preprocessing_params_name!r} "
-            f"first. Missing {len(missing)} member(s): {missing}. Run "
-            "RecordingSelection.insert_selection(...) and "
-            "Recording.populate(...) for each missing key, then retry. A "
-            "member whose sort group changed needs a new Recording."
+            "ConcatenatedRecordingSelection.insert_selection: "
+            f"{len(missing)} member(s) have no Recording under "
+            f"preprocessing_params_name={preprocessing_params_name!r}: "
+            f"{missing}. Run RecordingSelection.insert_selection(...) and "
+            "Recording.populate(...) for each, then retry."
         )
 
     # Deterministic id: PK uniqueness is the concurrency guard.

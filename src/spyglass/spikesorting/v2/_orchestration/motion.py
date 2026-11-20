@@ -148,11 +148,8 @@ def _run_motion_estimate(
                 f"{span['source_start_s']:.3f}-{span['source_end_s']:.3f} s"
                 for span in empty_spans
             )
-            + "); the displacement there rests on the estimator's "
-            "temporal prior only, so a correction applied to them is not "
-            "evidence-based. See run_summary"
-            "['motion_spans_without_evidence'] or "
-            "MotionEstimate().get_spans_without_evidence(...)."
+            + "), so their displacement comes from the temporal prior only. "
+            "See run_summary['motion_spans_without_evidence']."
         )
         logger.warning(empty_span_warning)
         warnings_list.append(empty_span_warning)

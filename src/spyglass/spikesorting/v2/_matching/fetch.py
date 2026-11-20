@@ -116,11 +116,8 @@ def fetch_unit_match_inputs(key) -> UnitMatchFetched:
     if recomputed_hash != sel["input_set_hash"]:
         raise exc_class(
             "UnitMatch.make: the selection's stored input_set_hash "
-            f"{sel['input_set_hash']} does not match the hash recomputed "
-            f"from its Input / InputRecording rows ({recomputed_hash}). "
-            "The master and its inputs were not created together by "
-            "insert_inputs (a raw-insert bypass that lets a master claim "
-            "one input set while matching on another). Use "
+            f"{sel['input_set_hash']} does not match its Input / "
+            f"InputRecording rows ({recomputed_hash}). Use "
             "UnitMatchSelection.insert_inputs()."
         )
     # A single input extracts no bundle and reads no traces file.

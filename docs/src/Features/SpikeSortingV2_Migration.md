@@ -738,8 +738,10 @@ its observed intervals.
     not. `default`, `default_neuropixels` and `no_filter` use the cortex window.
     A custom preprocessing row needs a `PreprocessingWaveformParameters` row;
     without one, preflight and the sort raise
-    `UnmappedPreprocessingWaveformsError`, whose message gives the `insert1` to
-    run. `clone_pipeline_preset` writes it for you.
+    `UnmappedPreprocessingWaveformsError`, whose message names the shipped
+    pairs. Insert one with `PreprocessingWaveformParameters.insert1(...)`
+    (keys `preprocessing_params_name`, `display_waveform_params_name`,
+    `metric_waveform_params_name`), or let `clone_pipeline_preset` write it.
 
 ## What has a v2 replacement
 

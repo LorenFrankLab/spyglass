@@ -102,13 +102,9 @@ def assert_shared_group_recordings_aggregatable(
 
     def _bypass(rid, detail):
         raise SchemaBypassError(
-            "SharedArtifactDetection.make_compute: shared-group members "
-            "are not "
-            f"channel-aggregatable -- recording_id={rid!r} {detail} differs "
-            f"from anchor recording_id={reference_id!r}. The member set was "
-            "inserted without SharedArtifactGroup.create_group (schema bypass); "
-            "``si.aggregate_channels`` would otherwise produce a silently wrong "
-            "union."
+            f"SharedArtifactDetection.make_compute: recording_id={rid!r} "
+            f"{detail} differs from anchor recording_id={reference_id!r}. "
+            "Recreate the member set with SharedArtifactGroup.create_group."
         )
 
     for recording, rid in zip(recordings[1:], recording_ids[1:]):
