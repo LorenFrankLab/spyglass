@@ -116,8 +116,12 @@ def unit_row(page, unit_id: int):
 
 
 def row_texts(row) -> list[str]:
-    """Every cell's text in ``row`` (the leading checkbox cell is ``""``)."""
-    cells = row.get_by_role("cell")
+    """Every cell's text in ``row`` (the leading checkbox cell is ``""``).
+
+    Header and data cells both count: newer Playwright gives a ``th`` the
+    ``columnheader`` role, so a role query would miss the header row.
+    """
+    cells = row.locator("xpath=./th | ./td")
     return [cells.nth(i).inner_text().strip() for i in range(cells.count())]
 
 
