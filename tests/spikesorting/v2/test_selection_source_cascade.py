@@ -444,14 +444,15 @@ def test_concat_sort_permission_check_records_issue_1725(drift_recording):
 
 # ---- ids do not depend on how the source is stored ---------------------------
 
-# Computed at 9a50238fd, when the source was stored on part tables.
+# The sorting ids match those from when the source was on part tables. The
+# motion ids (and the corrected sort) also include the source's content_hash.
 _PINNED_IDS = {
     "sort_recording": "eb79157c-f05c-5490-94e4-fb7502824ec7",
     "sort_recording_artifact": "05735f90-ae27-5d1c-8e7a-43a194974286",
     "sort_concat": "a614e306-d4d3-5ada-864e-f0aa259800d2",
-    "sort_recording_corrected": "fe5db092-a3f8-5cc2-8022-9534c0995f76",
-    "estimate_recording": "52f242cd-ca67-5070-80fd-1a1129f43f93",
-    "estimate_concat": "82232a34-4144-52db-b797-5382c102d26a",
+    "sort_recording_corrected": "5f771e28-d2d2-5c3e-b215-fa8e985717f7",
+    "estimate_recording": "7c651dfb-5e18-591e-b4aa-4d071b7245de",
+    "estimate_concat": "16ff004d-357e-5dca-997f-ce871db76737",
 }
 
 
