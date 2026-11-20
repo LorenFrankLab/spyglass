@@ -345,3 +345,81 @@ recommended replacement is the tri-part make pattern (`make_fetch`,
 `make_compute`, `make_insert`), which keeps the database insert inside a
 transaction while allowing long computations to run without holding a lock. See
 [Populate and Long-Running Computations](./Populate.md) for a migration guide.
+
+## Immutable Parameter Rows
+
+`ImmutableParamsLookup` protects a parameter `Lookup` table from in-place edits.
+Downstream rows refer to a parameter row by name, so new content under the same
+name silently changes what those rows mean. `update1` and
+`insert(..., replace=True)` raise `ImmutableRowError`. To change parameters,
+insert a new named row.
+
+```python
+import datajoint as dj
+
+from spyglass.utils import SpyglassMixin
+from spyglass.utils.mixins.immutable import ImmutableParamsLookup
+
+schema = dj.schema("my_schema")
+
+
+@schema
+class MyParams(SpyglassMixin, ImmutableParamsLookup, dj.Lookup):
+    definition = """
+    params_name: varchar(32)
+    ---
+    params: blob
+    """
+```
+
+The mixin goes after `SpyglassMixin` and before `dj.Lookup`. On a part table,
+put it before `SpyglassMixinPart`, which already ends in `dj.Part`.
+
+For a maintenance edit of a row that nothing references yet, pass
+`allow_param_mutation=True` to `update1`. `insert(replace=True)` has no escape
+hatch.
+
+## Factory-Only Masters
+
+`FactoryOnlyMaster` is for a master whose rows must be inserted together with
+their parts by a factory classmethod. A direct insert could leave a master
+without its parts, and an in-place edit changes what existing parts and
+downstream rows reference. Direct `insert` and `insert1` raise
+`UnsupportedDirectInsertError`, and `update1` raises `ImmutableRowError`. Set
+`_factory_create_call` to name the factory in these messages.
+
+```python
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.mixins.immutable import FactoryOnlyMaster
+
+
+@schema
+class MyGroup(SpyglassMixin, FactoryOnlyMaster, dj.Manual):
+    _factory_create_call = "MyGroup.create_group()"
+
+    definition = """
+    group_name: varchar(32)
+    """
+
+    class Member(SpyglassMixinPart):
+        definition = """
+        -> master
+        -> MyMember
+        """
+
+    @classmethod
+    def create_group(cls, group_name, member_keys):
+        with cls.connection.transaction:
+            cls.insert1({"group_name": group_name}, allow_direct_insert=True)
+            cls.Member.insert(
+                [{"group_name": group_name, **key} for key in member_keys]
+            )
+```
+
+As with `ImmutableParamsLookup`, the mixin goes after `SpyglassMixin` and before
+`dj.Manual`. To also block direct inserts into a part, add it to the part,
+before `SpyglassMixinPart`.
+
+The factory passes `allow_direct_insert=True` to reach the table. Pass it
+yourself, or `allow_master_mutation=True` to `update1`, only for a deliberate
+maintenance or test bypass.
