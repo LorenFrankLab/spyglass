@@ -16,6 +16,9 @@ def firing_rate_from_spike_indicator(
 
     if multiunit:
         spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
+    if spike_indicator.shape[1] == 0:
+        # Zero-unit group: np.stack([]) would raise
+        return np.zeros((spike_indicator.shape[0], 0))
     return np.stack(
         [
             get_multiunit_population_firing_rate(

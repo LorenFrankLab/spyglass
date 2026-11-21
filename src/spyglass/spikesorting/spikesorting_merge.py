@@ -213,7 +213,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """Get spike times for the group"""
         spike_times = []
         try:
-            for nwb_file in self.fetch_nwb(key):
+            for nwb_file in self.fetch_nwb(key, multi_source=True):
                 # V1 uses 'object_id', V0 uses 'units'
                 file_loc = "object_id" if "object_id" in nwb_file else "units"
                 spike_times.extend(nwb_file[file_loc]["spike_times"].to_list())

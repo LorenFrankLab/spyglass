@@ -31,12 +31,45 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     """
     catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
     pynwb.NWBHDF5IO.load_namespaces(catalog, file_path)
-    name_cat = TypeMap(catalog).namespace_catalog
+    return get_namespace_versions(TypeMap(catalog))
 
+
+def get_namespace_versions(type_map: TypeMap) -> dict:
+    """Get all namespace versions registered in a type map (e.g. pynwb's)."""
+    name_cat = type_map.namespace_catalog
     return {
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces
     }
+
+
+def env_matches(file_deps: Union[dict, None], env_deps: dict) -> bool:
+    """Whether a file's namespace versions are reproducible in ``env_deps``.
+
+    Compatible if every namespace in both agrees on version. Namespaces only
+    in the file are ignored, because extensions register lazily; namespaces
+    only in the environment are ignored, because the file did not use them.
+    No deps, or no shared namespace, is incompatible.
+
+    Parameters
+    ----------
+    file_deps : dict or None
+        Namespace name to version, as inventoried from the file.
+    env_deps : dict
+        Namespace name to version in this process, e.g.
+        ``get_namespace_versions(pynwb.get_manager().type_map)``.
+
+    Returns
+    -------
+    bool
+        True if the shared namespaces all agree.
+    """
+    if not file_deps:
+        return False
+    shared = set(file_deps) & set(env_deps)
+    if not shared:
+        return False
+    return all(file_deps[ns] == env_deps[ns] for ns in shared)
 
 
 DIGESTS = {"sha256": sha256, "md5": md5}

@@ -262,20 +262,34 @@ def fetch_nwb(*attrs, **kwargs):
     )
 
 
-def get_child_tables(table):
-    """Get all child tables of a given table."""
+def get_child_references(table):
+    """Get each child table projected to the attributes it shares with table.
+
+    ``table - get_child_references(table)`` leaves unreferenced rows.
+    Attributes secondary in both tables are dropped because DataJoint refuses
+    to join on them.
+
+    Parameters
+    ----------
+    table : dj.Table or type
+        Parent table, as an instance or class.
+
+    Returns
+    -------
+    list of QueryExpression
+        One projection per child table.
+    """
     table = table() if inspect.isclass(table) else table
-    return [
-        dj.FreeTable(
-            table.connection,
-            (
-                s
-                if not s.isdigit()
-                else next(iter(table.connection.dependencies.children(s)))
-            ),
-        )
-        for s in table.children()
-    ]
+    parent_secondary = set(table.heading.secondary_attributes)
+    references = []
+    for child in table.children(as_objects=True):
+        shared_secondary = [
+            name
+            for name in child.heading.secondary_attributes
+            if name in table.heading.names and name not in parent_secondary
+        ]
+        references.append(child.proj(*shared_secondary))
+    return references
 
 
 def _write_external_checksum(filepath, external_table, key):

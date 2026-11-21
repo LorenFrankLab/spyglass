@@ -103,3 +103,32 @@ def nwb_legacy_hasher(mini_path):
 def test_nwb_legacy_hasher(nwb_legacy_hasher):
     hash = nwb_legacy_hasher.hash
     assert hash.startswith("4e0c"), "Unexpected NWB file hash"
+
+
+@pytest.mark.parametrize(
+    "file_deps, expected",
+    [
+        ({"core": "2.9.0", "hdmf-common": "1.8.0"}, True),
+        ({"core": "2.9.0", "ndx-franklab-novela": "0.1.0"}, True),
+        ({"core": "0.0.0", "hdmf-common": "1.8.0"}, False),
+        ({"core": "2.9.0", "hdmf-common": "0.0.0"}, False),
+        ({"ndx-only": "1.0.0"}, False),
+        ({}, False),
+        (None, False),
+    ],
+    ids=[
+        "shared-agree",
+        "file-only-ignored",
+        "core-drift",
+        "hdmf-common-drift",
+        "no-shared",
+        "empty",
+        "none",
+    ],
+)
+def test_env_matches(file_deps, expected):
+    """Shared namespaces must agree; file-only and env-only ones are ignored."""
+    from spyglass.utils.nwb_hash import env_matches
+
+    env = {"core": "2.9.0", "hdmf-common": "1.8.0", "ndx-pose": "0.2.0"}
+    assert env_matches(file_deps, env) is expected

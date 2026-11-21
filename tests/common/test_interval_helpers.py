@@ -263,6 +263,88 @@ def test_subtract(interval_obj, one, two, min_length, expected_result):
 
 
 @pytest.mark.parametrize(
+    "one, two, reverse, expected_result",
+    [
+        (  # One removal covering both base intervals, #1692
+            [(3, 8), (14, 35)],
+            [(0, 53)],
+            False,
+            [],
+        ),
+        (  # One removal bridging the gap between base intervals, #1692
+            [(0, 5), (8, 10)],
+            [(4, 9)],
+            False,
+            [(0, 4), (9, 10)],
+        ),
+        (  # One removal spanning three base intervals
+            [(0, 2), (4, 6), (8, 10)],
+            [(1, 9)],
+            False,
+            [(0, 1), (9, 10)],
+        ),
+        (  # Touching edges: (3, 8) stops where the second base starts
+            [(0, 5), (8, 12)],
+            [(3, 8), (10, 12)],
+            False,
+            [(0, 3), (8, 10)],
+        ),
+        (  # reverse=True: self is removed from other
+            [(4, 9)],
+            [(0, 5), (8, 10)],
+            True,
+            [(0, 4), (9, 10)],
+        ),
+    ],
+)
+def test_subtract_spanning(interval_obj, one, two, reverse, expected_result):
+    ret = interval_obj(one).subtract(two, reverse=reverse)
+    assert np.array_equal(
+        ret.times.reshape(-1, 2), np.reshape(expected_result, (-1, 2))
+    ), "Problem with Interval.subtract across base intervals"
+
+
+def _subtract_reference(base, other):
+    """Remove every interval in `other` from each base interval separately."""
+    result = []
+    for start, stop in base:
+        pieces = [(start, stop)] if start < stop else []
+        for other_start, other_stop in other:
+            kept = []
+            for piece_start, piece_stop in pieces:
+                if other_stop <= piece_start or other_start >= piece_stop:
+                    kept.append((piece_start, piece_stop))
+                    continue
+                if piece_start < other_start:
+                    kept.append((piece_start, other_start))
+                if other_stop < piece_stop:
+                    kept.append((other_stop, piece_stop))
+            pieces = kept
+        result += pieces
+    return np.unique(np.reshape(result, (-1, 2)), axis=0)
+
+
+def test_subtract_matches_reference(interval_obj):
+    """Random sorted lists on a small integer grid, so edges often coincide."""
+    rng = np.random.default_rng(1692)
+    for _ in range(2000):
+        base, other = (
+            np.unique(
+                np.sort(rng.integers(0, 30, size=(rng.integers(0, 6), 2))),
+                axis=0,
+            )
+            for _ in range(2)
+        )
+        expected = _subtract_reference(base, other)
+        forward = interval_obj(base).subtract(other)
+        reverse = interval_obj(other).subtract(base, reverse=True)
+        for ret in (forward, reverse):
+            assert np.array_equal(
+                ret.times.reshape(-1, 2), expected
+            ), f"Interval.subtract mismatch for {base.tolist()} - {other.tolist()}"
+
+
+@pytest.mark.parametrize(
     "expected_result, min_len, max_len",
     [
         (np.array([[0, 1]]), 0.0, 10),
@@ -448,3 +530,64 @@ def test_interval_from_inds(interval_obj, interval_list, expected_result):
     assert np.array_equal(
         interval_obj(interval_list, from_inds=True).times, expected_result
     ), "Problem with Interval(x, from_inds=True)"
+
+
+@pytest.mark.parametrize(
+    "rows, expected_result",
+    [
+        ([[5, 9], [0, 2], [2, 3]], [[0, 3], [5, 9]]),  # touching rows merge
+        ([[0, 5], [3, 3], [4, 8]], [[0, 8]]),  # zero-length row inside
+        ([[0, 1], [4, 4]], [[0, 1], [4, 4]]),  # isolated zero-length row
+    ],
+)
+def test_consolidate_merge_touching(interval_obj, rows, expected_result):
+    ret = interval_obj(np.array(rows)).consolidate(merge_touching=True).times
+    assert ret.tolist() == expected_result, "Problem with merge_touching"
+    assert ret.dtype == np.int64
+
+
+def test_intersect_merge_touching(interval_obj):
+    touching = np.array([[0.0, 5.0], [5.0, 10.0]])
+    other = np.array([[0.0, 10.0]])
+    merged = interval_obj(touching).intersect(other, merge_touching=True)
+    assert merged.times.tolist() == [[0.0, 10.0]]
+    assert interval_obj(touching).intersect(other).times.tolist() == [
+        [0.0, 5.0],
+        [5.0, 10.0],
+    ]
+    empty = interval_obj(np.empty((0, 2)), warn=False)
+    assert len(empty.intersect(other, merge_touching=True)) == 0
+
+
+def test_intersect_matches_pairwise_reference(interval_obj):
+    """Every positive-length overlap of the consolidated rows, sorted.
+
+    `other` is consolidated in its given row order, as `intersect` does.
+    """
+    rng = np.random.default_rng(1729)
+    for _ in range(2000):
+        one, two = (
+            np.sort(rng.integers(0, 30, size=(rng.integers(1, 6), 2)))
+            for _ in range(2)
+        )
+        other = interval_obj(two, no_duplicates=False).consolidate().times
+        overlaps = [
+            (max(a[0], b[0]), min(a[1], b[1]))
+            for a in interval_obj(one).consolidate().times
+            for b in other
+            if max(a[0], b[0]) < min(a[1], b[1])
+        ]
+        expected = np.unique(np.reshape(overlaps, (-1, 2)), axis=0)
+        ret = interval_obj(one).intersect(two).times
+        assert np.array_equal(
+            ret.reshape(-1, 2), expected
+        ), f"Interval.intersect mismatch for {one.tolist()} & {two.tolist()}"
+
+
+def test_consolidate_disjoint_and_empty_lists(interval_obj):
+    """Disjoint rows come back sorted and unmerged; an empty list is kept."""
+    rows = np.array([[4, 6], [0, 2], [2, 3]])
+    ret = interval_obj(rows).consolidate().times
+    assert ret.tolist() == [[0, 2], [2, 3], [4, 6]]
+    empty = interval_obj(np.empty((0, 2)), warn=True)
+    assert empty.consolidate().times.shape == (0, 2)
