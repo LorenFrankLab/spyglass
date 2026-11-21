@@ -149,6 +149,8 @@ def start_curating(page) -> None:
 def select_units(page, *unit_ids: int) -> None:
     """Select exactly ``unit_ids`` through the unit table's row checkboxes."""
     rows = page.get_by_role("row")
+    # A tab that a test opens itself may not show its unit rows yet.
+    rows.nth(1).wait_for()
     listed_units = set()
     for index in range(1, rows.count()):  # row 0 is the header
         row = rows.nth(index)
