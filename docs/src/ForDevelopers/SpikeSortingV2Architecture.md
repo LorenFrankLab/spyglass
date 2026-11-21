@@ -1601,11 +1601,8 @@ v2 assumes a trusted compute operator; the user-facing rules are in the
 - v2 analysis NWB files are created `0o644`
     (`AnalysisNwbfile().create(..., restrict_permission=True)`). Sorter scratch
     is world-writable only for a container backend.
-- Importing `spyglass.spikesorting.v2.sorting` also declares the
-    `spikesorting_v2_motion` schema, so users need insert privileges on it, as
-    on every other `spikesorting_v2_*` schema. `dj_user` has no `CREATE` on the
-    shared `spikesorting` prefix, so an admin declares the v2 tables once
-    ([Management](./Management.md)).
+- Schema privileges and who declares the v2 tables are in the migration
+    guide's trust model ([Management](./Management.md) for the admin steps).
 
 ## Process and threading
 

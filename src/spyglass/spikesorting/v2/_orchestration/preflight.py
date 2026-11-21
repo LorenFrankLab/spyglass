@@ -447,7 +447,7 @@ def _resolve_session_sort_group_ids(
     """
     if pipeline_preset is None:
         raise PipelineInputError(
-            f"{caller}: pipeline_preset is required -- a whole-session run does "
+            f"{caller}: pipeline_preset is required: a whole-session run does "
             "not infer a default. Call describe_pipeline_presets() to choose "
             "one, then pass pipeline_preset=..."
         )

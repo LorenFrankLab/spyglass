@@ -897,7 +897,7 @@ def describe_units(sorting_id) -> "pd.DataFrame":
         raise ValueError(
             f"describe_units: sorting_id {sorting_id!r} has {len(unit_rows)} "
             f"unit(s) but its observed duration is {duration_s}s. A sort with "
-            "units cannot span zero observed time -- check the recording "
+            "units cannot span zero observed time. Check the recording "
             "duration and the artifact-detection interval."
         )
     rows = []

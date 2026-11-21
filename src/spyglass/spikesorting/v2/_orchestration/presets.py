@@ -150,12 +150,12 @@ def _fetch_job_kwargs(rel):
 
 RECOMMENDATION_STATUS_MEANINGS: dict[str, str] = {
     "production": (
-        "Frank-lab validated and recommended for real science -- the default "
+        "Frank-lab validated and recommended for real science; the default "
         "choice for its probe / target region / sampling rate."
     ),
     "alternative": (
         "A sound, working substitute for when the production recipe does not "
-        "fit -- e.g. MountainSort5 is an alternative to production MountainSort4. "
+        "fit, e.g. MountainSort5 as an alternative to production MountainSort4. "
         "Fine to use; just "
         "not the lab's first pick for that probe/region."
     ),
@@ -734,7 +734,7 @@ def _derive_preset_parameters(stages, overrides, base_name):
             )
         if len(matches) > 1:
             raise PipelineInputError(
-                f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous -- it "
+                f"clone_pipeline_preset: override key {dotted_key!r} is ambiguous: it "
                 f"matches multiple stages {sorted(matches)}. clone_pipeline_preset "
                 "cannot disambiguate a top-level key shared across stages; "
                 "insert the parameter row directly for this change."

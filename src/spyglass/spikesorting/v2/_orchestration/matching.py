@@ -152,7 +152,7 @@ def run_v2_unit_match(
             raise PipelineInputError(
                 "run_v2_unit_match: pass a UnitMatchPlan OR the explicit "
                 "(session_group_owner, session_group_name, matcher_params_name, "
-                "curation_choices) form -- not both. The plan already carries "
+                "curation_choices) form, not both. The plan already carries "
                 "the group, matcher, and pinned curations."
             )
         is_input_plan = isinstance(plan, UnitMatchInputPlan)

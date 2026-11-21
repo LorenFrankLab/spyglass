@@ -143,7 +143,7 @@ def _check_session_rows(
         },
         f"IntervalList 'raw data valid times' not found for {nwb_file_name!r}; "
         "the recording build reads it for the raw sample bounds. A partial "
-        "ingest can miss it -- re-run ingestion (populate_all_common / "
+        "ingest can miss it; re-run ingestion (populate_all_common / "
         "insert_sessions).",
     )
     check(

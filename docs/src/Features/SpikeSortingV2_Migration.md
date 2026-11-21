@@ -164,26 +164,12 @@ permissions and path handling are in the
     can cascade-delete another team's rows.
     `SortGroupV2.preview_existing_entries` lists that blast radius; it does not
     block.
-- Users need insert privileges on the `spikesorting_v2_motion` schema, as on
-    every other `spikesorting_v2_*` schema. On a lab database `dj_user` cannot
+- Users need insert privileges on the `spikesorting_v2_motion` schema, which
+    importing `spyglass.spikesorting.v2.sorting` declares, as on every other
+    `spikesorting_v2_*` schema. On a lab database `dj_user` cannot
     create tables under the shared `spikesorting` prefix, so an admin declares
     the v2 tables once; the [CHANGELOG](../CHANGELOG.md) release notes give the
     imports.
-
-### Databases that already hold v2 tables
-
-A database that declared the v2 tables from a branch before this release has no
-migration: table shapes and some ids changed. An admin drops the
-`spikesorting_v2_*` schemas and the `SpikeSortingOutput` parts `CurationV2` and
-`ConcatMemberCurationV2` (with their master rows), then declares them again as
-the [CHANGELOG](../CHANGELOG.md) release notes show.
-
-- A `recording_id` also depends on the saved time cut (the sort interval
-    intersected with the raw data's valid times, after `min_segment_length`).
-    Selections made before this release are not reused: rerunning a pipeline
-    call mints a new recording and sort.
-- Editing an `IntervalList` in place makes the next `insert_selection` mint a
-    new recording; the old selection raises `RecordingInputDriftError`.
 
 ## Porting a v1 sort to v2
 
@@ -357,8 +343,7 @@ a dated name):
     hippocampus preprocessing row, with the `default` artifact row. Hand the
     root curation's `merge_id` to `UnitWaveformFeatures`. There is no
     unit-selection step: the thresholder yields one "unit" per channel group.
-    The `franklab_clusterless_2026_06` preset is no longer shipped; the
-    `default` clusterless sorter row (100 µV) remains.
+    The `default` clusterless sorter row (100 µV) remains.
 - `franklab_neuropixels_ks4_2026_06`: **experimental** Kilosort4 recipe matched
     to the
     [AIND `aind-ephys-spikesort-kilosort4`](https://github.com/AllenNeuralDynamics/aind-ephys-spikesort-kilosort4)
@@ -707,6 +692,11 @@ its observed intervals.
     `Sorting.find_orphaned_analyzer_folders(dry_run=True)` finds 5-50 GB
     analyzer folders left by deletes that bypass `Sorting.delete()` (see
     [Disk space](#disk-space-and-recompute)).
+- **A recording's id follows its time cut.** A `recording_id` depends on the
+    saved time cut: the sort interval intersected with the raw data's valid
+    times, after `min_segment_length`. Editing an `IntervalList` in place makes
+    the next `insert_selection` mint a new recording; the old selection raises
+    `RecordingInputDriftError`.
 - **Immutable identity-bearing masters.** Deterministic-id selection masters,
     `CurationV2`, `SessionGroup` and `SharedArtifactGroup` reject `update1`;
     `CurationV2`, `SessionGroup` and `SharedArtifactGroup` (and its `Member`

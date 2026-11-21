@@ -148,7 +148,7 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
             "sorter_installed",
             False,
             f"sorter {bundle.sorter!r} is not a known SpikeInterface sorter "
-            "(spikeinterface.sorters.available_sorters()) -- check the spelling "
+            "(spikeinterface.sorters.available_sorters()). Check the spelling "
             "or the preset.",
         )
 
@@ -171,7 +171,7 @@ def _check_local_sorter_runtime(bundle, sis, non_si_sorters, check) -> None:
             f"{'; '.join(broken_backends)}. Install/repair the backend "
             '(for MountainSort4, install "spyglass-neuro[spikesorting-v2]"), '
             "or pick a "
-            "preset whose sorter runs in this environment -- e.g. a MountainSort5 "
+            "preset whose sorter runs in this environment, e.g. a MountainSort5 "
             "preset, or a containerized MountainSort4 preset whose runtime lives "
             "in the container.",
         )
