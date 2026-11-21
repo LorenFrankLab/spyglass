@@ -1,0 +1,505 @@
+"""UnitMatch cross-session matcher backend.
+
+Concrete :class:`~spyglass.spikesorting.v2.matcher_protocol.MatcherProtocol`
+implementation wrapping `UnitMatchPy <https://github.com/EnnyvanBeest/UnitMatch>`_.
+
+- :func:`extract_unitmatch_bundle` writes one input's waveform bundle.
+- :meth:`UnitMatchBackend.match` runs inference over bundle directories only;
+  it never sees a recording, analyzer, or Spyglass key.
+
+UnitMatchPy is optional (``.[spikesorting-v2-matching]``); see
+:class:`_ArangeProxy` for its numpy-2 shim.
+"""
+
+from __future__ import annotations
+
+import functools
+import hashlib
+import json
+from types import SimpleNamespace
+import importlib.metadata
+
+import numpy as np
+
+from spyglass.spikesorting.v2._params.matcher import UnitMatchParamsSchema
+from spyglass.spikesorting.v2._matching.waveforms import (
+    WaveformInputPreparer,
+)
+from spyglass.utils import logger
+from spyglass.spikesorting.v2.matcher_protocol import (
+    MatchPair,
+    SessionMatcherInput,
+    is_registered,
+    register_matcher,
+)
+from spyglass.spikesorting.v2.matcher_protocol import (
+    WAVEFORM_BUNDLE_LAYOUT,
+    WAVEFORM_BUNDLE_VERSION,
+)
+
+_INSTALL_HINT = (
+    "UnitMatchPy is required for cross-session matching. Install it with "
+    '`pip install -e ".[spikesorting-v2-matching]"` (UnitMatchPy>=3.2.6,<3.2.8). '
+    "If the import fails on `_tkinter`, the top-level "
+    "`import UnitMatchPy` is loading its Tk GUI; run in a Tk-enabled "
+    "environment."
+)
+
+
+# Advisory only: a session with fewer matchable units only triggers a warning.
+UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION = 10
+
+# UnitMatchPy passes; 2 means one pass of between-session drift correction.
+_UNITMATCH_NITER = 2
+
+# UnitMatchPy's threshold search finds no candidate below this many units.
+_MIN_UNITS_TO_CALIBRATE = 3
+
+
+def _unit_count_summary(session_inputs, good_units) -> str:
+    """Per-session ``sorting_id: n units`` text for error messages."""
+    return ", ".join(
+        f"{s.curation_key['sorting_id']}: {len(g)} unit"
+        f"{'' if len(g) == 1 else 's'}"
+        for s, g in zip(session_inputs, good_units)
+    )
+
+
+def _raised_in_threshold_search(exc: BaseException) -> bool:
+    """True if ``exc`` came from UnitMatchPy's ``get_threshold``."""
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name == "get_threshold":
+            return True
+        tb = tb.tb_next
+    return False
+
+
+class _ArangeProxy:
+    """numpy proxy that coerces 1-element-array ``arange`` endpoints to scalars.
+
+    UnitMatchPy 3.2.7's ``get_avg_waveform_per_tp`` passes 1-element
+    ``np.argwhere`` arrays to ``np.arange``; numpy>=2 raises, and UnitMatch's
+    bare ``except`` silently corrupts the waveform trajectory.
+    """
+
+    def arange(self, start, stop=None, *args, **kwargs):
+        start = start.item() if getattr(start, "size", None) == 1 else start
+        if stop is not None:
+            stop = stop.item() if getattr(stop, "size", None) == 1 else stop
+            return np.arange(start, stop, *args, **kwargs)
+        return np.arange(start, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(np, name)
+
+
+@functools.lru_cache(maxsize=1)
+def _require_unitmatch() -> SimpleNamespace:
+    """Import the UnitMatchPy submodules and install the numpy-2 shim (cached).
+
+    Raises ``ImportError`` with an install hint if UnitMatchPy is absent or
+    its top-level (GUI) import fails.
+    """
+    try:
+        import UnitMatchPy.assign_unique_id as assign_unique_id
+        import UnitMatchPy.bayes_functions as bayes_functions
+        import UnitMatchPy.default_params as default_params
+        import UnitMatchPy.extract_raw_data as extract_raw_data
+        import UnitMatchPy.overlord as overlord
+        import UnitMatchPy.param_functions as param_functions
+        import UnitMatchPy.utils as utils
+    except ImportError as exc:  # missing package or Tk-less GUI import
+        raise ImportError(_INSTALL_HINT) from exc
+
+    if not isinstance(param_functions.np, _ArangeProxy):
+        param_functions.np = _ArangeProxy()
+
+    return SimpleNamespace(
+        assign_unique_id=assign_unique_id,
+        bayes_functions=bayes_functions,
+        default_params=default_params,
+        extract_raw_data=extract_raw_data,
+        overlord=overlord,
+        param_functions=param_functions,
+        utils=utils,
+    )
+
+
+def extract_unitmatch_bundle(
+    session_dir,
+    recording,
+    sorting,
+    *,
+    ms_before: float = 1.5,
+    ms_after: float = 1.5,
+    max_spikes_per_unit: int = 100,
+    seed: int = 0,
+    job_kwargs: dict | None = None,
+    statistics_spans=None,
+) -> list[int]:
+    """Write the shared waveform layout consumed by UnitMatch inference."""
+    from spyglass.spikesorting.v2._matching.waveforms import (
+        extract_waveform_bundle,
+    )
+
+    return extract_waveform_bundle(
+        session_dir,
+        recording,
+        sorting,
+        ms_before=ms_before,
+        ms_after=ms_after,
+        max_spikes_per_unit=max_spikes_per_unit,
+        seed=seed,
+        job_kwargs=job_kwargs,
+        statistics_spans=statistics_spans,
+    )
+
+
+def assert_consistent_channel_geometry(named_positions) -> None:
+    """Reject sessions that do not share one probe geometry.
+
+    UnitMatch derives geometry from the first session's channel positions
+    and requires every session to share it.
+
+    Parameters
+    ----------
+    named_positions : sequence of (label, ndarray)
+        Ordered ``(session_label, channel_positions)`` pairs. Fewer than two
+        sessions pass.
+
+    Raises
+    ------
+    ValueError
+        On the first session whose channel-position array differs from the
+        first session's (shape mismatch or not ``np.allclose``).
+    """
+    named_positions = list(named_positions)
+    if len(named_positions) < 2:
+        return
+    ref_label, ref_positions = named_positions[0]
+    ref_positions = np.asarray(ref_positions)
+    for label, positions in named_positions[1:]:
+        positions = np.asarray(positions)
+        if positions.shape != ref_positions.shape or not np.allclose(
+            positions, ref_positions
+        ):
+            raise ValueError(
+                "UnitMatch requires all sessions to share one probe geometry "
+                "(cross-probe / cross-day geometry matching is not supported), "
+                f"but session {label} has channel positions {positions.shape} "
+                f"that differ from session {ref_label}'s {ref_positions.shape}. "
+                "Group only sessions recorded on the same probe."
+            )
+
+
+class UnitMatchInputPreparer(WaveformInputPreparer):
+    """Prepare UnitMatch's layout through its established extraction entry point."""
+
+    @staticmethod
+    def extract(*args, **kwargs):
+        return extract_unitmatch_bundle(*args, **kwargs)
+
+
+class UnitMatchBackend:
+    """The ``unitmatch`` cross-session matcher backend."""
+
+    name = "unitmatch"
+
+    #: ``{"n_units", "n_units_per_input", "n_expected_matches"}`` of the last
+    #: ``match`` call that reached UnitMatch, else ``None``.
+    last_run_diagnostics: dict | None = None
+
+    @staticmethod
+    def _validate_bundle_layouts(session_inputs) -> None:
+        for bundle in session_inputs:
+            if (bundle.layout, bundle.layout_version) != (
+                WAVEFORM_BUNDLE_LAYOUT,
+                WAVEFORM_BUNDLE_VERSION,
+            ):
+                raise ValueError(
+                    f"UnitMatch requires {WAVEFORM_BUNDLE_LAYOUT!r} version "
+                    f"{WAVEFORM_BUNDLE_VERSION}; input {bundle.curation_key} "
+                    f"declares {bundle.layout!r} version {bundle.layout_version}."
+                )
+            if bundle.geometry_path is None:
+                raise ValueError(
+                    f"UnitMatch requires geometry_path for input {bundle.curation_key}."
+                )
+
+    @staticmethod
+    def validate_geometry(named_positions, params) -> None:
+        """Require one shared probe geometry before selecting or matching inputs."""
+        assert_consistent_channel_geometry(named_positions)
+
+    @staticmethod
+    def provenance_fingerprints(params: dict) -> dict[str, str]:
+        """Fingerprint the UnitMatchPy settings that determine a run.
+
+        Covers the scalar entries of UnitMatchPy's ``get_default_param()``
+        (radii, distances, smoothing, shank thresholds), the number of
+        drift-corrected passes, and whether the numpy-2 ``arange`` shim is
+        installed. Returns ``{}`` when UnitMatchPy is not installed.
+
+        Parameters
+        ----------
+        params : dict
+            The matcher parameters row; unused, UnitMatchPy's own settings
+            are not part of it.
+
+        Returns
+        -------
+        dict of str to str
+            ``default_params_sha256``, ``niter`` and ``numpy_arange_shim``.
+        """
+        try:
+            um = _require_unitmatch()
+        except ImportError:
+            return {}
+        defaults = um.default_params.get_default_param()
+        scalars = {
+            key: value
+            for key, value in sorted(defaults.items())
+            if isinstance(value, (bool, int, float, str))
+        }
+        digest = hashlib.sha256(
+            json.dumps(scalars, sort_keys=True).encode()
+        ).hexdigest()
+        return {
+            "default_params_sha256": digest,
+            "niter": str(_UNITMATCH_NITER),
+            "numpy_arange_shim": str(
+                isinstance(um.param_functions.np, _ArangeProxy)
+            ).lower(),
+        }
+
+    @staticmethod
+    def backend_version() -> str | None:
+        """Installed ``unitmatchpy`` distribution version, or ``None`` if absent.
+
+        Recorded as ``UnitMatch`` provenance.
+        """
+        try:
+            return importlib.metadata.version("unitmatchpy")
+        except importlib.metadata.PackageNotFoundError:
+            return None
+
+    def match(
+        self,
+        session_inputs: list[SessionMatcherInput],
+        params: dict,
+    ) -> list[MatchPair]:
+        """Run UnitMatch over the prepared per-input bundles.
+
+        Returns ``[]`` for the degenerate single-session case without importing
+        or calling UnitMatch. Warns when a session has fewer than
+        ``UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION`` units, and sets
+        ``last_run_diagnostics`` once UnitMatch has run.
+
+        Raises
+        ------
+        ValueError
+            Fewer than ``_MIN_UNITS_TO_CALIBRATE`` units in total, or
+            UnitMatch's threshold search failed on a degenerate population.
+        """
+        self.last_run_diagnostics = None
+        if len(session_inputs) < 2:
+            return []
+
+        self._validate_bundle_layouts(session_inputs)
+        um = _require_unitmatch()
+        param = um.default_params.get_default_param()
+        match_threshold = float(
+            params.get("match_threshold", param["match_threshold"])
+        )
+        param["match_threshold"] = match_threshold
+
+        # Backstop for the selection-time preflight.
+        self.validate_geometry(
+            [
+                (s.curation_key, np.load(s.geometry_path))
+                for s in session_inputs
+            ],
+            params,
+        )
+        raw_positions = np.load(session_inputs[0].geometry_path)
+
+        session_dirs = [str(s.bundle_dir) for s in session_inputs]
+        param["KS_dirs"] = session_dirs
+        wave_paths, label_paths, channel_pos = um.utils.paths_from_KS(
+            session_dirs
+        )
+        # paths_from_KS prepends a ones column that collapses the shanks.
+        param = um.utils.get_probe_geometry(raw_positions, param)
+
+        (
+            waveform,
+            session_id,
+            session_switch,
+            within_session,
+            good_units,
+            param,
+        ) = um.utils.load_good_waveforms(
+            wave_paths, label_paths, param, good_units_only=True
+        )
+        # Guards against a UnitMatchPy change; 3.2.7 loads one entry per path.
+        if len(good_units) != len(session_inputs):
+            raise RuntimeError(
+                f"UnitMatch loaded {len(good_units)} session(s) but "
+                f"{len(session_inputs)} were provided, so units cannot be "
+                "attributed to the correct session. Check each session bundle's "
+                "RawWaveforms/ and cluster_group.tsv."
+            )
+        # The prior below divides by n_units ** 2.
+        if param["n_units"] == 0:
+            return []
+        if param["n_units"] < _MIN_UNITS_TO_CALIBRATE:
+            raise ValueError(
+                self._too_few_units_message(session_inputs, good_units)
+            )
+        self._warn_if_small_population(session_inputs, good_units)
+        clus_info = {
+            "good_units": good_units,
+            "session_switch": session_switch,
+            "session_id": session_id,
+            "original_ids": np.concatenate(good_units),
+        }
+        extracted = um.overlord.extract_parameters(
+            waveform, channel_pos, clus_info, param
+        )
+        try:
+            total_score, candidate_pairs, scores_to_include, predictors = (
+                um.overlord.extract_metric_scores(
+                    extracted,
+                    session_switch,
+                    within_session,
+                    param,
+                    niter=_UNITMATCH_NITER,
+                )
+            )
+        except IndexError as exc:
+            if not _raised_in_threshold_search(exc):
+                raise
+            raise ValueError(
+                self._too_few_units_message(session_inputs, good_units)
+            ) from exc
+        self.last_run_diagnostics = {
+            "n_units": int(param["n_units"]),
+            "n_units_per_input": [len(g) for g in good_units],
+            "n_expected_matches": int(param["n_expected_matches"]),
+        }
+        prior_match = 1 - (param["n_expected_matches"] / param["n_units"] ** 2)
+        priors = np.array((prior_match, 1 - prior_match))
+        labels = candidate_pairs.astype(int)
+        cond = np.unique(labels)
+        kernels = um.bayes_functions.get_parameter_kernels(
+            scores_to_include, labels, cond, param, add_one=1
+        )
+        probability = um.bayes_functions.apply_naive_bayes(
+            kernels, priors, predictors, param, cond
+        )
+        prob_matrix = probability[:, 1].reshape(
+            param["n_units"], param["n_units"]
+        )
+
+        return self._pairs_from_matrix(
+            prob_matrix,
+            session_switch,
+            clus_info["original_ids"],
+            session_inputs,
+            match_threshold,
+        )
+
+    @staticmethod
+    def _warn_if_small_population(session_inputs, good_units) -> None:
+        """Warn when a session is below the advisory matchable-unit count."""
+        if all(
+            len(g) >= UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION
+            for g in good_units
+        ):
+            return
+        logger.warning(
+            "UnitMatch probabilities are relative to the population in the "
+            "run and are unreliable for small populations; a session has "
+            f"fewer than {UNITMATCH_ADVISORY_MIN_UNITS_PER_SESSION} matchable "
+            "units (" + _unit_count_summary(session_inputs, good_units) + "). "
+            "Units from different cells can match with high probability."
+        )
+
+    @staticmethod
+    def _too_few_units_message(session_inputs, good_units) -> str:
+        return (
+            "UnitMatch has too few matchable units to calibrate its match "
+            "threshold ("
+            + _unit_count_summary(session_inputs, good_units)
+            + "). Match inputs with more units, or add sessions."
+        )
+
+    @staticmethod
+    def _pairs_from_matrix(
+        prob_matrix,
+        session_switch,
+        original_ids,
+        session_inputs,
+        match_threshold,
+    ) -> list[MatchPair]:
+        """Unflatten the probability matrix into cross-session MatchPairs.
+
+        The matrix is asymmetric. As in UnitMatch's ``assign_unique_id``, a
+        pair needs both directions above threshold, and ``match_probability``
+        is their mean. Each unordered cross-session pair is emitted once, with
+        side A the earlier session in ``session_inputs``.
+        """
+        boundaries = np.asarray(session_switch).ravel()
+        n = prob_matrix.shape[0]
+        if n == 0:
+            return []
+        prob = np.asarray(prob_matrix, dtype=float)
+
+        session_ids = (
+            np.searchsorted(boundaries, np.arange(n), side="right") - 1
+        )
+        upper = np.triu(np.ones((n, n), dtype=bool), k=1)
+        cross_session = session_ids[:, None] != session_ids[None, :]
+        both_pass = (prob > match_threshold) & (prob.T > match_threshold)
+        mask = upper & cross_session & both_pass
+        mean_prob = (prob + prob.T) / 2.0
+
+        def unit_of(stacked_index) -> int:
+            return int(np.asarray(original_ids[stacked_index]).item())
+
+        pairs: list[MatchPair] = []
+        for i, j in np.argwhere(mask):
+            key_a = session_inputs[int(session_ids[i])].curation_key
+            key_b = session_inputs[int(session_ids[j])].curation_key
+            pairs.append(
+                MatchPair(
+                    session_a_sorting_id=str(key_a["sorting_id"]),
+                    session_a_curation_id=int(key_a["curation_id"]),
+                    unit_a_id=unit_of(i),
+                    session_b_sorting_id=str(key_b["sorting_id"]),
+                    session_b_curation_id=int(key_b["curation_id"]),
+                    unit_b_id=unit_of(j),
+                    match_probability=float(mean_prob[i, j]),
+                )
+            )
+        return pairs
+
+
+def register() -> None:
+    """Install the UnitMatch backend + schema if ``"unitmatch"`` is missing.
+
+    Called at import and by ``register_default_matchers`` after a cleared
+    registry. Fill-only: an existing registration, including a deliberate
+    replacement, is kept.
+    """
+    if is_registered(UnitMatchBackend.name):
+        return
+    register_matcher(
+        UnitMatchBackend(),
+        UnitMatchParamsSchema,
+        input_preparer=UnitMatchInputPreparer(),
+    )
+
+
+register()

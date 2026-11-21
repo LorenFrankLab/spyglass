@@ -124,6 +124,7 @@ def clear_curations_for(sorting_key) -> None:
     )
     from spyglass.spikesorting.v2.curation import CurationIdCounter, CurationV2
 
+    drop_unitmatch_selections_for(sorting_key)
     for mid in (SpikeSortingOutput.ConcatMemberCurationV2 & sorting_key).fetch(
         "merge_id"
     ):
@@ -268,6 +269,7 @@ def _clean_session_v2(session_key):
             & [{"recording_id": r["recording_id"]} for r in rec_keys]
         ).fetch("KEY", as_dict=True)
         if sorting_keys:
+            drop_unitmatch_selections_for(sorting_keys)
             merge_ids = (SpikeSortingOutput.CurationV2 & sorting_keys).fetch(
                 "merge_id"
             )
@@ -408,6 +410,7 @@ def clean_session_groups_for_owner(owner: str) -> None:
             "KEY", as_dict=True
         )
         if sort_keys:
+            drop_unitmatch_selections_for(sort_keys)
             for mid in (
                 SpikeSortingOutput.ConcatMemberCurationV2 & sort_keys
             ).fetch("merge_id"):
