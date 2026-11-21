@@ -1,3 +1,5 @@
+from __future__ import annotations  # handles SI version issues
+
 import numpy as np
 import spikeinterface as si
 

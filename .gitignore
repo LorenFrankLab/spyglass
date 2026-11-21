@@ -6,6 +6,9 @@ mysql_config
 memray*
 root_*.y*ml
 
+# Local dev
+.claude/*
+
 # Notebooks
 *.ipynb
 !notebooks/[0-9]*.ipynb
@@ -184,6 +187,10 @@ docs/site/
 !docs/src/notebooks/*.ipynb
 !docs/src/images/*png
 temp*
+tmp*
 
 # Version
 _version.py
+
+# SpikeInterface 0.99 fixtures; last, so it overrides the ignores above
+!tests/spikesorting/fixtures/si099/**

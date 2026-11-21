@@ -77,9 +77,10 @@ sorter_keys = {
 # +
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 
-# get the merge_ids for the selected sorting
+# get the merge_ids for the selected sorting. sources=["v1"]: a group cannot
+# mix v1 and v2 sorts, which a session sorted by both would otherwise match
 spikesorting_merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
-    sorter_keys, restrict_by_artifact=False
+    sorter_keys, sources=["v1"], restrict_by_artifact=False
 )
 
 # create a new sorted spikes group

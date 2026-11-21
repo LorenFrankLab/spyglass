@@ -27,6 +27,14 @@ class _UnitsRelation(_Relation):
         return self.merge_ids
 
 
+class _NoSnapshotRelation(_Relation):
+    """A group without frozen ``UnitSelection`` rows."""
+
+    def fetch(self, *, as_dict):
+        assert as_dict is True
+        return []
+
+
 class _ParamsRelation(_Relation):
     def __init__(self, include_labels=(), exclude_labels=()):
         self.include_labels = list(include_labels)
@@ -48,8 +56,9 @@ class _MergeRelation(_Relation):
         self.nwb_files = nwb_files
         self.merge_ids = merge_ids
 
-    def fetch_nwb(self, *, return_merge_ids, multi_source=None):
+    def fetch_nwb(self, *, return_merge_ids, multi_source):
         assert return_merge_ids is True
+        assert multi_source is True
         return self.nwb_files, self.merge_ids
 
 
@@ -62,6 +71,7 @@ def _fetch(monkeypatch, nwb_files, params=None):
 
     class _FakeSortedSpikesGroup:
         Units = _UnitsRelation(merge_ids)
+        UnitSelection = _NoSnapshotRelation()
         fetch_spike_data = classmethod(original.fetch_spike_data.__func__)
 
         @classmethod
