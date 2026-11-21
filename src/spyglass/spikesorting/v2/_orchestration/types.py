@@ -6,14 +6,7 @@
   ``NotRequired`` and break ``__required_keys__``.
 """
 
-from typing import (
-    Any,
-    Literal,
-    Mapping,
-    NamedTuple,
-    Sequence,
-    TypeAlias,
-)
+from typing import Any, Literal, NamedTuple, TypeAlias
 from uuid import UUID
 
 from typing_extensions import NotRequired, TypedDict
@@ -23,71 +16,6 @@ PipelineOutcome: TypeAlias = Literal["ok", "failed"]
 SourceMode: TypeAlias = Literal["single_session", "concat"]
 # ``estimate`` sorts the uncorrected source; ``apply`` sorts the corrected one.
 MotionMode: TypeAlias = Literal["off", "estimate", "apply"]
-
-
-class RunV2PipelineOptions(TypedDict, total=False):
-    """Options shared by ``run_v2_pipeline`` and ``run_v2_concat_pipeline``.
-
-    Every key is optional and mirrors the function default.
-    """
-
-    pipeline_preset: str
-    curation_description: str
-    require_units: bool
-    auto_curate: bool
-    preflight: bool
-    manual_excluded_times: (
-        Sequence[Sequence[float]]
-        | Mapping[int, Sequence[Sequence[float]]]
-        | None
-    )
-    motion_mode: MotionMode
-    motion_correction_params_name: str | None
-    motion_estimate_id: UUID | str | None
-
-
-class RunV2PipelineInputs(RunV2PipelineOptions):
-    """Keyword-argument bundle for a typed ``run_v2_pipeline(**inputs)`` call.
-
-    The sort group's four source fields are required; the options are not.
-    """
-
-    nwb_file_name: str
-    sort_group_id: int
-    interval_list_name: str
-    team_name: str
-
-
-class RunV2ConcatPipelineInputs(RunV2PipelineOptions):
-    """Keyword-argument bundle for ``run_v2_concat_pipeline(**inputs)``."""
-
-    session_group_owner: str
-    session_group_name: str
-
-
-class RunV2PipelineSessionRequiredInputs(TypedDict):
-    """Required ``run_v2_pipeline_session`` keyword arguments."""
-
-    nwb_file_name: str
-    interval_list_name: str
-    team_name: str
-    pipeline_preset: str
-
-
-class RunV2PipelineSessionInputs(
-    RunV2PipelineSessionRequiredInputs, total=False
-):
-    """Keyword-argument bundle accepted by ``run_v2_pipeline_session``."""
-
-    sort_group_ids: list[int]
-    curation_description: str
-    require_units: bool
-    auto_curate: bool
-    preflight: bool
-    continue_on_error: bool
-    manual_excluded_times: Sequence[Sequence[float]] | None
-    motion_mode: MotionMode
-    motion_correction_params_name: str | None
 
 
 class PipelineStageSeconds(TypedDict):
@@ -364,13 +292,8 @@ __all__ = [
     "PipelineOutcome",
     "PipelineStageSeconds",
     "RunV2ConcatSummary",
-    "RunV2ConcatPipelineInputs",
-    "RunV2PipelineInputs",
-    "RunV2PipelineOptions",
     "RunV2PipelineSessionFailed",
-    "RunV2PipelineSessionInputs",
     "RunV2PipelineSessionOk",
-    "RunV2PipelineSessionRequiredInputs",
     "RunV2PipelineSessionResult",
     "RunV2PipelineSummary",
     "RunV2SingleSessionSummary",

@@ -20,7 +20,7 @@ def main() -> None:
         PreprocessingParamsSchema,
     )
     from spyglass.spikesorting.v2._orchestration.types import (
-        RunV2PipelineInputs,
+        EstimateMotionReceipt,
     )
     from spyglass.spikesorting.v2._sorting.dispatch import run_si_sorter
 
@@ -28,7 +28,7 @@ def main() -> None:
     # Both native sorters the spikesorting-v2 extra installs.
     assert "mountainsort5" in sis.installed_sorters(), sis.installed_sorters()
     assert callable(mountainsort4.mountainsort4)
-    assert "manual_excluded_times" in RunV2PipelineInputs.__optional_keys__
+    assert "recording_id" in EstimateMotionReceipt.__optional_keys__
     PreprocessingParamsSchema.model_validate({})
     recording, _ = si.generate_ground_truth_recording(
         num_channels=4,

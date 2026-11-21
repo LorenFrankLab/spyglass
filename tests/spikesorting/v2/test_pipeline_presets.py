@@ -1111,30 +1111,21 @@ def test_single_and_concat_entry_points_share_their_options(single, concat):
 
 
 @pytest.mark.unit
-def test_run_options_typeddict_matches_entry_point_options():
-    """``RunV2PipelineOptions`` names exactly the run entry points' options."""
-    import inspect
-
-    from spyglass.spikesorting.v2 import pipeline
-
-    options = [
-        p.name
-        for p in inspect.signature(pipeline.run_v2_pipeline).parameters.values()
-        if p.kind is p.KEYWORD_ONLY
-    ]
-    assert set(pipeline.RunV2PipelineOptions.__annotations__) == set(options)
-
-
-@pytest.mark.unit
 def test_run_request_carries_every_run_option():
     """The validated request below the entry points holds every run option."""
     import dataclasses
+    import inspect
 
     from spyglass.spikesorting.v2 import pipeline
     from spyglass.spikesorting.v2._orchestration.source import _RunRequest
 
+    options = {
+        p.name
+        for p in inspect.signature(pipeline.run_v2_pipeline).parameters.values()
+        if p.kind is p.KEYWORD_ONLY
+    }
     fields = {field.name for field in dataclasses.fields(_RunRequest)}
-    assert set(pipeline.RunV2PipelineOptions.__annotations__) <= fields
+    assert options <= fields
 
 
 _FORWARDED_ESTIMATE_ID = "0a3f9e9e-7d55-4a4e-9d55-0a3f9e9e7d55"

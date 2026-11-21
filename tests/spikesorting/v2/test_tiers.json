@@ -64,7 +64,6 @@
         "test_initialize_v2_defaults_runs_catalog_audit": "db_unit",
         "test_list_pipeline_presets_enumerates_all_pipeline_presets": "db_unit",
         "test_run_v2_pipeline_auto_curate_param_defaults_false": "unit",
-        "test_run_v2_pipeline_input_typeddicts_carry_auto_curate": "unit",
         "test_stage_statuses_vocabulary_includes_skipped": "unit",
         "test_verify_v2_default_catalog_flags_stale": "db_unit",
         "test_verify_v2_default_catalog_flags_validated_and_part_drift": "db_unit"

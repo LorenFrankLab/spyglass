@@ -139,47 +139,6 @@ def test_pipeline_type_contracts_are_reexported_from_facade():
 
     for name in pipeline_types.__all__:
         assert getattr(pipeline, name) is getattr(pipeline_types, name)
-
-    options = {
-        "pipeline_preset",
-        "curation_description",
-        "require_units",
-        "auto_curate",
-        "preflight",
-        "manual_excluded_times",
-        "motion_mode",
-        "motion_correction_params_name",
-        "motion_estimate_id",
-    }
-    assert pipeline_types.RunV2PipelineInputs.__required_keys__ == {
-        "nwb_file_name",
-        "sort_group_id",
-        "interval_list_name",
-        "team_name",
-    }
-    assert pipeline_types.RunV2PipelineInputs.__optional_keys__ == options
-    assert pipeline_types.RunV2ConcatPipelineInputs.__required_keys__ == {
-        "session_group_owner",
-        "session_group_name",
-    }
-    assert pipeline_types.RunV2ConcatPipelineInputs.__optional_keys__ == options
-    assert pipeline_types.RunV2PipelineSessionInputs.__required_keys__ == {
-        "nwb_file_name",
-        "interval_list_name",
-        "team_name",
-        "pipeline_preset",
-    }
-    assert pipeline_types.RunV2PipelineSessionInputs.__optional_keys__ == {
-        "sort_group_ids",
-        "curation_description",
-        "require_units",
-        "auto_curate",
-        "preflight",
-        "continue_on_error",
-        "manual_excluded_times",
-        "motion_mode",
-        "motion_correction_params_name",
-    }
     # NotRequired keys must appear in __optional_keys__; postponed annotations
     # in _pipeline_types would make every key required.
     assert pipeline_types.PipelineStageSeconds.__required_keys__ == {

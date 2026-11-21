@@ -932,17 +932,6 @@ def test_run_v2_pipeline_auto_curate_param_defaults_false():
         assert param.default is False, fn.__name__
 
 
-def test_run_v2_pipeline_input_typeddicts_carry_auto_curate():
-    """The public ``*Inputs`` TypedDicts include the ``auto_curate`` keyword."""
-    from spyglass.spikesorting.v2._orchestration.types import (
-        RunV2PipelineInputs,
-        RunV2PipelineSessionInputs,
-    )
-
-    assert "auto_curate" in RunV2PipelineInputs.__optional_keys__
-    assert "auto_curate" in RunV2PipelineSessionInputs.__optional_keys__
-
-
 @pytest.mark.slow
 def test_run_v2_pipeline_auto_curate_materializes_child(polymer_smoke_session):
     """``auto_curate=True`` scores the root curation and commits a labeled child.
