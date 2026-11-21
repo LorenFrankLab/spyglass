@@ -88,11 +88,12 @@ def reference_filter(
 # --------------------------------------------------------------------------- #
 # Fixtures
 # --------------------------------------------------------------------------- #
-@pytest.fixture(scope="module")
-def fir():
-    from spyglass.common import _fir_filter as fir
+@pytest.fixture(scope="module", name="fir")
+def fir_module():
+    # Named apart from the module-level ``fir`` the autouse fixture binds.
+    from spyglass.common import _fir_filter
 
-    yield fir
+    yield _fir_filter
 
 
 @pytest.fixture(scope="module")

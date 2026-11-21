@@ -21,8 +21,8 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
-    _get_recording_timestamps,
     get_group_by_shank,
+    read_raw_nwb_recording,
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
@@ -474,10 +474,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         return recording
 
-    @staticmethod
-    def _get_recording_timestamps(recording):
-        return _get_recording_timestamps(recording)
-
     def _get_sort_interval_valid_times(self, key: dict):
         """Identifies the intersection between sort interval specified by the user
         and the valid times (times for which neural data exist, excluding e.g. dropped packets).
@@ -596,7 +592,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - apply referencing depending on the option chosen by the user
         # - apply bandpass filter
         # - set probe to recording
-        recording = se.read_nwb_recording(
+        recording = read_raw_nwb_recording(
             nwb_file_abs_path, load_time_vector=True
         )
         all_timestamps = recording.get_times()

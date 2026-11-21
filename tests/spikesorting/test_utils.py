@@ -34,12 +34,14 @@ class TestGetGroupByShank:
         The Electrode DataJoint table is an external dependency, so it is
         patched with a fake that returns a structured array of electrode rows.
         """
+        from spyglass.common import common_ephys
         from spyglass.spikesorting import utils as spikesorting_utils
 
         def _run(rows, **kwargs):
             records = np.array(rows, dtype=ELECTRODE_DTYPE)
+            # get_group_by_shank imports Electrode from here when called.
             monkeypatch.setattr(
-                spikesorting_utils, "Electrode", _FakeElectrode(records)
+                common_ephys, "Electrode", _FakeElectrode(records)
             )
             return spikesorting_utils.get_group_by_shank("test.nwb", **kwargs)
 

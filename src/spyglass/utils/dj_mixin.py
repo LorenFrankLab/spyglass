@@ -34,7 +34,7 @@ class SpyglassMixin(
         Fetch NWBFile object from relevant table. Uses either a foreign key to
         a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
         determine which table to use.
-    cautious_delete(force_permission=False, *args, **kwargs)
+    cautious_delete(*restrictions, force_permission=False, **kwargs)
         Check user permissions before deleting table rows. Permission is granted
         to users listed as admin in LabMember table or to users on a team with
         with the Session experimenter(s). If the table where the delete is
@@ -157,7 +157,7 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
     delete calls from upstream tables to downstream tables.
     """
 
-    def delete(self, *args, force: bool = False, **kwargs):
+    def delete(self, *restrictions, force: bool = False, **kwargs):
         """Delete master and part entries.
 
         By default, the part's restriction is promoted to its master and the
@@ -169,11 +169,13 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
 
         Parameters
         ----------
+        *restrictions : Any
+            Restrictions applied to this part before the delete.
         force : bool, optional
             If True, delete only the matching entries of this part table,
             leaving the master untouched and skipping promotion of the
             restriction. Default False.
-        *args, **kwargs : Any
+        **kwargs : Any
             Delete options, e.g. ``safemode``. Passed to the master's delete
             when ``force`` is False, and to ``Table.delete`` when it is True.
 
@@ -183,12 +185,17 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
             If ``force`` is False and the restriction cannot be applied to the
             master table.
         """
+        if restrictions:
+            return self._restrict_delete_args(restrictions).delete(
+                force=force, **kwargs
+            )
+
         if force:
             # dj.Part.delete accepts only `force` and forwards nothing, so
             # reaching it through super() would reject safemode and friends.
             if not kwargs.pop("force_permission", False):
                 self._check_delete_permission()
-            return dj.Table.delete(self, *args, force_parts=True, **kwargs)
+            return dj.Table.delete(self, force_parts=True, **kwargs)
 
         restriction = self.restriction or True  # for (tbl & restr).delete()
         master_name = dj.utils.get_master(self.full_table_name)
@@ -210,7 +217,7 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         except DataJointError as err:
             raise no_master_err from err
 
-        return restricted.delete(*args, **kwargs)
+        return restricted.delete(**kwargs)
 
 
 class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):

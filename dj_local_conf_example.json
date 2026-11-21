@@ -47,7 +47,9 @@
       "waveforms": "/your/base/path/waveforms",
       "temp": "/your/base/path/tmp",
       "video": "/your/base/path/video",
-      "export": "/your/base/path/export"
+      "export": "/your/base/path/export",
+      "analyzer": "/your/base/path/spikesorting_v2/analyzers",
+      "figpack": "/your/base/path/spikesorting_v2/figpack"
     },
     "kachery_dirs": {
       "cloud": "/your/base/path/.kachery-cloud",

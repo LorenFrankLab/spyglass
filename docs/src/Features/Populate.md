@@ -81,12 +81,91 @@ class MyHeavyTable(SpyglassMixin, dj.Computed):
     data.
 3. `make_compute` must not access the database at all.
 4. `make_insert` is the only method that writes to the database.
-5. Each method returns a list; the next method receives those values as
-    positional arguments after `key`.
+5. Each method returns a list or tuple; the next method receives those values
+    as positional arguments after `key`.
 6. `make_compute` must not return `None`. DataJoint tests the result against
     `None` to decide whether to compute, so a `None` return computes a second
     time — inside the transaction — and then skips `make_insert`. Return `[]`
     when there is nothing to pass along.
+
+### Named results (optional)
+
+A method can return a `NamedTuple` in place of a list. DataJoint still unpacks
+it by position, so the field order must match the next method's parameters
+after `key`. The return site names each value, and the annotation states what
+the method returns:
+
+```python
+from typing import NamedTuple
+
+
+class MyTableFetched(NamedTuple):
+    data: np.ndarray
+    params: dict
+
+
+class MyTableComputed(NamedTuple):
+    result: dict
+
+
+class MyTable(SpyglassMixin, dj.Computed):
+    def make_fetch(self, key) -> MyTableFetched:
+        return MyTableFetched(
+            data=(UpstreamTable & key).fetch1("raw_data"),
+            params=(ParameterTable & key).fetch1("params"),
+        )
+
+    def make_compute(self, key, data, params) -> MyTableComputed:
+        return MyTableComputed(result=heavy_analysis(data, params))
+
+    def make_insert(self, key, result):
+        self.insert1(dict(key, **result))
+```
+
+## Files written in `make_compute`
+
+A file `make_compute` writes is on disk before `make_insert` registers it. If
+the populate then fails (the second `make_fetch` differs, or `make_insert`
+raises), the file is left behind with no row. To remove it, define
+`_staged_outputs`, which maps a `make_compute` result to what it wrote:
+
+```python
+from spyglass.utils.mixins.populate import StagedOutputs
+
+
+class MyTable(SpyglassMixin, dj.Computed):
+    def _staged_outputs(self, computed):
+        analysis_file_name, results_path = computed
+        return StagedOutputs(
+            analysis_file_names=(analysis_file_name,),  # AnalysisNwbfile names
+            paths=(results_path,),  # other files or folders
+        )
+```
+
+With a [named result](#named-results-optional), read the fields by name:
+`computed.analysis_file_name`.
+
+Only list outputs unique to this attempt: they are deleted if the populate does
+not succeed. Outputs are kept once `make_insert` returns, so a failed commit
+after it, or a killed process, can still leave a file behind.
+
+## Several jobs populating the same key
+
+A tri-part `make_compute` runs outside the transaction, so two jobs that
+populate the same key at once both compute it, and the second insert is
+refused. For a slow table, set `_populate_key_lock = True`:
+
+```python
+class MyHeavyTable(SpyglassMixin, dj.Computed):
+    _populate_key_lock = True
+```
+
+Each job then takes a MySQL named lock on the table and key before computing.
+A job that finds the lock taken logs that it is waiting, then skips the key
+once the other job has populated it. The lock is best effort: if it cannot be
+taken, the populate goes ahead, and a dropped session releases it.
+`populate_key_lock(table, key)` takes the same lock in other code that must not
+run alongside a populate of that key.
 
 ## `_parallel_make`
 

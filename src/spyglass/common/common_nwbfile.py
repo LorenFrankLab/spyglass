@@ -8,7 +8,6 @@ import h5py
 import numpy as np
 import pandas as pd
 import pynwb
-import spikeinterface as si
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
 
@@ -20,7 +19,6 @@ from spyglass.common._nwbfile_cleanup import (
 )
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
     _acquire_nwb_file,

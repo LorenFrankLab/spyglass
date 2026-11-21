@@ -16,7 +16,9 @@
       "waveforms": "waveforms",
       "temp": "tmp",
       "video": "video",
-      "export": "export"
+      "export": "export",
+      "analyzer": "spikesorting_v2/analyzers",
+      "figpack": "spikesorting_v2/figpack"
     },
     "kachery": {
       "cloud": ".kachery-cloud",

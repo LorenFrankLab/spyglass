@@ -10,6 +10,40 @@ import all foreign key references.
 -->
 
 ```python
+# Databases created before 0.6.0 also need these 0.6.0 alters. Skip any you
+# have already run.
+from spyglass.common.common_filter import FirFilterParameters
+from spyglass.decoding.v1.core import DecodingParameters
+from spyglass.position.v1.position_dlc_project import DLCProject
+from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
+
+FirFilterParameters().alter()  # #1464
+DecodingParameters().alter()  # #1463
+DLCProject().alter()  # #1534
+UnitSelectionParams().alter()  # #1670; only needed to use unit_criteria
+
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+```
+
+```python
 # Add `github_user_name` to LabMember.LabMemberInfo. `alter()` cannot add the
 # unique index, so run the DDL directly. `AFTER` keeps positional inserts in
 # the same order as a fresh instance. Restart Python afterward.
@@ -24,7 +58,166 @@ info.connection.query(
 )
 ```
 
+```python
+# Spike sorting v2 (#1609). `dj_user` cannot create tables under the shared
+# `spikesorting` prefix, so an admin declares the 14 `spikesorting_v2_*`
+# schemas once, then installs the default rows.
+from importlib import import_module
+
+for module in (
+    "recording",
+    "artifact",
+    "artifact_output",
+    "sorting",
+    "curation",
+    "metric_curation",
+    "review_profile",
+    "concat_member_curation",
+    "figpack_curation",
+    "session_group",
+    "unit_matching",
+    "recompute",
+    "motion",
+    "pipeline_preset",
+):
+    import_module(f"spyglass.spikesorting.v2.{module}")
+
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+
+initialize_v2_defaults()
+
+# `UnitAnnotation` rows written with positional unit ids (#1609): list them,
+# then remap them to NWB unit ids. `add_annotation` and `fetch_unit_spikes`
+# refuse a merge with unmigrated rows.
+from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+UnitAnnotation.audit_positional_unit_ids()
+UnitAnnotation.migrate_positional_unit_ids(dry_run=True)  # then dry_run=False
+```
+
+```python
+# A database that declared spike sorting v2 tables from a branch of #1609
+# before this release has no migration: table shapes and some ids changed. An
+# admin drops the `spikesorting_v2_*` schemas and the `SpikeSortingOutput`
+# parts `CurationV2` and `ConcatMemberCurationV2` (with their master rows),
+# then declares them again with the block above.
+```
+
 ### Breaking Changes
+
+#### Spike Sorting v2 and SpikeInterface 0.104 (#1609)
+
+This release adds the Spike Sorting v2 pipeline (`spyglass.spikesorting.v2`) and
+pins `spikeinterface==0.104.3`, which allows NumPy 2. New sorts use v2. See the
+[Spike Sorting v2 migration guide](Features/SpikeSortingV2_Migration.md).
+
+To upgrade an existing install, keep the current environment under a new name
+as a fallback and upgrade a copy of it. The new environment reads v0/v1 results.
+From the repository root:
+
+```bash
+conda deactivate
+# 1. Rename the existing environment
+conda create --name sg_spikesort_legacy --clone spyglass
+conda env remove -n spyglass
+# 2. Create a new `spyglass` environment from it
+conda create --name spyglass --clone sg_spikesort_legacy
+# 3. Upgrade the dependencies, with the v2 sorters
+mamba env update -f environments/environment.yml --prune
+conda activate spyglass
+pip install -e ".[spikesorting-v2]"
+```
+
+For v0/v1 users:
+
+- Existing v0/v1 rows, and their saved recordings, sortings and binary-folder
+    waveforms, stay readable, including through `SpikeSortingOutput` and
+    `SortedSpikesGroup`.
+- The `spike_location` waveform feature is v2-only and raises
+    `NotImplementedError` for v0/v1 sorts. Existing v0/v1 `spike_location`
+    features give each unit the locations of every unit's spikes, so they do not
+    align with the unit's spike times. v0/v1 `UnitWaveformFeatures` selections
+    need a features row without it (such as `amplitude`).
+- These v0/v1 entry points raise `RuntimeError` under SpikeInterface 0.104:
+    - v0 and v1 `SpikeSorting` populate with any sorter other than
+        `clusterless_thresholder`
+    - v0 `ArtifactDetection`, `Waveforms`, `QualityMetrics` and `BurstPair`
+        populate
+    - v1 `ArtifactDetection`, `MetricCuration` and `BurstPair` populate, and
+        `MetricCuration.get_waveforms` when it has to extract waveforms
+    - clusterless `UnitMarks` (decoding v0) and `UnitWaveformFeatures` (decoding
+        v1) for v0/v1 sorts
+    - loading a Zarr-format waveform folder
+
+#### Spike Sorting Dependencies Are an Extra (#1609)
+
+`pip install spyglass-neuro` no longer installs SpikeInterface, probeinterface,
+numba, pydantic or sortingview. Session ingestion, LFP, position, linearization
+and ripple detection work without them. Spike sorting, MUA, decoding and
+`RippleTimesV1.create_figurl` need the `spikesorting` extra:
+
+```bash
+pip install "spyglass-neuro[spikesorting]"
+```
+
+`environments/environment.yml` and the `spikesorting-v2` extras include it.
+
+#### Spike-sorting recordings read the raw `ElectricalSeries` by name (#1609)
+
+v0 and v1 recordings now open the raw acquisition `ElectricalSeries` by name
+(`e-series`, `electricalseries`, `ephys` or `electrophysiology`, the names `Raw`
+ingestion uses) rather than letting SpikeInterface pick one; v2 opens the series
+whose object id is `Raw.raw_object_id`. SpikeInterface 0.104 will not guess when
+a file also stores LFP. A file with no matching series, or more than one, raises
+`ValueError`.
+
+#### Spike-sorting analysis results can change (#1609)
+
+- V2 specific and global-median referencing require uniform finite channel
+    offsets and uniform finite positive gains across all contributing channels,
+    including a specific reference electrode. Unsupported calibration raises
+    before raw-count subtraction can silently change physical units. Filtered
+    recordings are checked after the filter has cleared their offsets.
+- Firing-rate smoothing on `SpikeSortingOutput` and `SortedSpikesGroup` stops at
+    gaps in the time axis.
+- `SortedSpikesDecodingV1` combines a user-supplied
+    `decoding_kwargs["is_missing"]` with the missingness derived from the
+    decoding intervals, so time outside the decoding intervals is not decoded.
+    Results change for calls that supply `is_missing`. For populations that
+    include v2 sorts, encoding and decoding are also restricted to the time
+    every unit was observed; when no observed training time remains it raises
+    `ValueError`. Results record the intervals used in
+    `spyglass_observation_intervals`, `spyglass_encoding_intervals` and
+    `spyglass_decoding_intervals` attributes.
+- `MuaEventsV1` smooths, normalizes and detects events within each contiguous
+    observed run, and numbers events uniquely in time order. Results change for
+    intervals with more than one valid-time segment.
+- The waveform-feature `amplitude` is read at each spike's sample (the
+    extractor's `nbefore`), not the window midpoint. Results change only for
+    windows with unequal `ms_before` and `ms_after`.
+
+#### Deletes take restrictions positionally (#1609)
+
+`delete`, `cautious_delete` and `super_delete` on Spyglass tables and merge
+tables treat positional arguments as restrictions. `force_permission`, `dry_run`
+and `warn` are keyword-only.
+
+```python
+# OLD: positional flag
+Table().cautious_delete(True)
+
+# NEW: name the flag, and pass restrictions positionally if you like
+Table().cautious_delete(force_permission=True)
+Table().delete({"nwb_file_name": nwb_file_name})
+```
+
+#### Merge `fetch_nwb` refuses multi-source restrictions (#1609)
+
+`Merge.fetch_nwb` (for example `SpikeSortingOutput().fetch_nwb(key)`) raises
+`ValueError` when the restriction resolves to more than one source part. Pass
+`multi_source=True` to fetch across sources. `return_merge_ids=True` now pairs
+each file with its own merge id, and a restriction may name parent attributes
+such as `sort_group_id`.
 
 #### `LabMemberInfo` Takes Five Values (#1686)
 
@@ -77,6 +270,10 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 ### Documentation
 
+- Add Spike Sorting v2 documentation: a v1 to v2 migration guide, a developer
+    guide, and the tutorial notebooks `10_Spike_SortingV2`,
+    `10_Spike_SortingV2_Tables`, `10_Spike_SortingV2_Curation`,
+    `10_Spike_SortingV2_Presets` and `10_Spike_SortingV2_CrossSession` #1609
 - Add LFP artifact detection to the LFP notebook #1641
 - Add File Backends developer page #1662
 - Repair stale notebook cross-links and guard them with a test #1678
@@ -87,6 +284,49 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 
 ### Infrastructure
 
+- Update dependency pins: `numpy>=1.26,<3`, `scipy>=1.13`,
+    `spikeinterface==0.104.3`, `probeinterface>=0.3.2`, `jax<0.10`,
+    `non-local-detector==0.6.9`, `ripple-detection>=1.7`, `keypoint-moseq>=0.6`;
+    declare `networkx`, and `numba` and `pydantic>=2` in the new `spikesorting`
+    extra; drop the `panel>=1.4` pin, which Spyglass does not import and which
+    blocked `keypoint-moseq` 0.6 (it pins `panel==0.14.4`) #1609
+- `environment.yml` and `environment_min.yml` move to NumPy 2 and `scipy>=1.13`;
+    `environment.yml` installs `torch>=2` from pip instead of conda
+    `pytorch<1.12`; native MountainSort4 1.0.7 is installed through the v2 extra
+    and runs on NumPy 2 with the v2 compatibility path. The DLC and MoSeq
+    environments stay on NumPy < 2 #1609
+- Add `environments/environment_spikesorting_v2.yml` and the test-only
+    `environments/environment_spikesorting_legacy.yml` #1609
+- Add optional extras `spikesorting-v2` (MountainSort4, MountainSort5, torch),
+    `spikesorting-v2-matching` (UnitMatchPy), `spikesorting-v2-curation`
+    (FigPack browser review, ipywidgets), and the test-only
+    `spikesorting-v2-curation-test` and `spikesorting-v2-validation` #1609
+- Add the `spikesorting` extra (SpikeInterface, probeinterface, numba, pydantic,
+    sortingview), which the `spikesorting-v2` extras include. `insert_sessions`
+    skips the spike sorting and decoding merge tables without the extra #1609
+- The `spikesorting-v2` extra requires `filelock>=3.15`: earlier releases reset
+    a reused singleton lock's counter, so the v2 analyzer cache's nested acquire
+    deadlocks #1609
+- `cautious_delete` honors an explicit `force_masters=False` instead of always
+    forcing master deletion #1609
+- Add `spyglass.utils.nwb_helper_fn.get_raw_eseries_path` (select the raw
+    acquisition series by name or by `object_id=`) and
+    `raw_eseries_path_and_timestamp_mode` #1609
+- Rename `spyglass.utils.dj_helper_fn.get_child_tables` to
+    `get_child_references` #1609
+- The `spikesorting-v2` extras require `threadpoolctl>=3` for runtime receipts;
+    drop the `pubnub<6.4` pin #1609
+- Add `dj.config["custom"]` keys for spike sorting v2:
+    `spikesorting_v2_job_kwargs` (SpikeInterface job settings for every stage)
+    and `figpack_api_key` (or `FIGPACK_API_KEY`) for hosted reviews #1609
+- Add Spyglass directories `analyzer` and `figpack` (`SPYGLASS_ANALYZER_DIR`,
+    `SPYGLASS_FIGPACK_DIR`, default `{base}/spikesorting_v2/...`) for spike
+    sorting v2 caches; `maintenance_scripts/cleanup.py` reports their
+    orphans #1609
+- Add `spyglass.utils.nwb_hash.get_namespace_versions`, shared by v1 and v2
+    recompute and file namespace capture #1609
+- Run spike-sorting tests in separate CI jobs: `pytest-legacy` (SpikeInterface
+    0.99, v0/v1) and a sharded `pytest-v2` (SpikeInterface 0.104) #1609
 - Prevent errors during update for dandi standard from propagating to other
     files #1677
 - Refactor `get_nwb_file` fallbacks into a pluggable `FileBackend` protocol
@@ -109,6 +349,7 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
 - Stop calling `populate()` on deprecated `make`s in tests #1678
 - Repair a stale raw external checksum when a container is reused #1678
 - Force the v1 recompute selection attempt in its test fixture #1678
+- Remove the test MySQL container's data volume with the container #1732
 - Monitor open NWBs, and close under RAM or file-descriptior pressure. Adds
     `close_nwb()` (and implements for `fetch_dataframe` and similar),
     `custom.nwb_cache` config, and a `psutil` dependency #1606
@@ -127,15 +368,38 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
     for a new `kachery-legacy` extra #1686
 - Add `digest_file` to return several digests of a file's raw bytes in one read
     #1686
+- Add `spyglass.utils.numerical` validators for integer and finite numeric
+    arguments #1727
+- Add `ImmutableParamsLookup` and `FactoryOnlyMaster` mixins in
+    `spyglass.utils.mixins.immutable`, which block in-place edits of parameter
+    rows and direct inserts into factory-built masters #1734
 
 ### Pipelines
 
 - Common
 
+    - `AnalysisFileIssues` skips a recompute-deleted file only while it is missing
+        from disk, so a rebuilt file is checked again #1609
     - Run `UserEnvironment` pip freeze via the active interpreter #1678
+    - Move `Interval` to `spyglass.utils.interval`, importable without a
+        database; `common_interval` re-exports it #1729
+    - Fix `Interval.subtract` applying an interval that spans several base
+        intervals to the first one only #1730
+    - Parse pip versions with a PEP 440 local label (e.g. `torch==2.5.1+cpu`)
+        in `UserEnvironment`; one such line disabled recompute for the env #1713
+    - `UserEnvironment.insert_current_env` returns the id it inserted, not the
+        requested id another environment already holds #1713
 
 - Decoding
 
+    - `UnitWaveformFeatures` accepts v2 sorts, with amplitudes in µV, read from
+        the recording the sorter saw. Spikes too near a recording edge for a full
+        waveform window are dropped with a warning. v0/v1 marks were scaled to µV
+        only when the recording carried gains and come from different
+        preprocessing, so do not mix v0/v1 and v2 marks in one decoder #1609
+    - `UnitWaveformFeaturesGroup.create_group` raises for merge ids that mix v2
+        and v0/v1 outputs. It and `UnitWaveformFeatures` populate also refuse a v2
+        curation whose proposed merges are not applied #1609
     - Pair waveform-feature units with spike times by label, not position #1678
 
 - Position
@@ -163,10 +427,212 @@ rows = SpikeSortingOutput().get_sort_group_info(merge_keys).fetch(as_dict=True)
         written before this have a null hash; a recompute of one warns and is
         accepted. Run `SpikeSortingRecording().update_ids()` to backfill them
         #1662
+    - Add Spike Sorting v2 (`spyglass.spikesorting.v2`). `run_v2_pipeline` runs
+        preprocessing, artifact detection, sorting and curation of one sort
+        group from a named preset and registers the result in
+        `SpikeSortingOutput`; `run_v2_concat_pipeline` does the same for a
+        same-day `SessionGroup` concatenation. v2 adds native MountainSort4 as
+        the default sorter (MountainSort5, Kilosort4, SpykingCircus2 and
+        Tridesclous2 also supported), content-addressed parameters and
+        selections, hash-verified recompute, optional experimental motion
+        correction, browser-based review with FigPack, and cross-session unit
+        tracking with UnitMatch. See the Spike Sorting v2 docs #1609
+    - v2 unit matching accepts disjoint epochs within one NWB, orders them on the
+        original acquisition clock, and rejects overlapping raw samples. Add
+        `describe_epochs`, `plan_v2_unit_match_from_curations`, and a read-only
+        matching preflight. Matching freezes the selected population's policy,
+        evidence and unit IDs using the same resolver as downstream analysis; the
+        snapshots and source coverage are also stored in the run's NWB #1609
+    - v2 sparse analyzers select channels using the sorter's spike polarity,
+        preserving positive and bidirectional peak electrode/amplitude metadata
+        #1609
+    - v2 `isi_violation` uses original spike timestamps and excludes artificial
+        concatenation joins, preventing acquisition gaps from creating false
+        refractory violations #1609
+    - `SpikeSortingOutput` gains `CurationV2` and `ConcatMemberCurationV2` parts,
+        declared when the v2 module imports. If it cannot import, the parts are
+        omitted and the cause is logged (an `ImportError` as a warning, any other
+        error with its traceback); v0/v1 keep working. `get_restricted_merge_ids`
+        now defaults to every available source, including v2, and warns when both
+        v2 and v0/v1 outputs match; pass `sources=["v1"]` or `sources=["v2"]` to
+        pick one. A session key also returns the concat-member outputs recorded in
+        that session #1609
+    - `get_spike_indicator` gains keyword-only `return_validity` on
+        `SpikeSortingOutput` and `SortedSpikesGroup`, and
+        `SpikeSortingOutput.get_spike_indicator` gains `return_unit_ids`
+        (`SortedSpikesGroup` already had it). For v2 sorts, spike-indicator and
+        firing-rate bins outside observed time are NaN. Add
+        `SpikeSortingOutput.get_observation_intervals` and
+        `get_spike_times_by_unit`; `get_spike_times` warns when a restriction
+        spans sources #1609
+    - Add `SortedSpikesGroup.UnitSelection`, which records each group's selected
+        units at creation, and `create_group(unit_selections=...)`. `create_group`
+        raises for a v2 member without a unit selection (use
+        `spyglass.spikesorting.v2.select_units_for_analysis`) and for members that
+        mix v2 and v0/v1 outputs #1609
+    - `SpikeSortingOutput.get_sort_group_info` accepts several v2 merge ids #1609
+    - v1 `show_available_metrics` lists metrics the installed SpikeInterface does
+        not provide as unavailable instead of failing #1609
+    - v0/v1 read paths warn once under a SpikeInterface release other than 0.99
+        or 0.104, the releases their compatibility shims are tested on #1609
+    - v2 `manual_excluded_times` are absolute session timestamps. An exclusion
+        that overlaps no sorted time fails preflight and raises
+        `IneffectiveManualExclusionError` #1609
+    - v2 parameter rows: inserting a stored name with different content raises
+        `DuplicateParameterContentError`, also with `skip_duplicates=True`. A
+        custom preprocessing row needs a `PreprocessingWaveformParameters` row,
+        else `UnmappedPreprocessingWaveformsError` gives the insert to run #1609
+    - v2 `recording_id` also depends on the saved time cut, so recordings selected
+        before this release are not reused. Editing an `IntervalList` in place
+        raises `RecordingInputDriftError` for the old selection #1609
+    - v2 sorters that estimate their own noise and whitening (all but
+        MountainSort4/5 and the clusterless thresholder) see artifact-masked
+        frames filled with seeded noise at each channel's artifact-free level;
+        preflight and `describe_run` show the `masked_fill` #1609
+    - v2 merges drop a cross-unit double detection by comparing each spike with
+        the last kept spike; merged curation analyzers rebuild once #1609
+    - The shipped v2 clusterless preset is `franklab_clusterless_2026_11` (60 µV,
+        `franklab_clusterless_60uv_2026_11` sorter row);
+        `franklab_clusterless_2026_06` is no longer shipped #1609
+    - v2 reviews are per DataJoint user; deleting a `Sorting`, `CurationV2` or
+        FigPack row removes its local review bundles, and
+        `FigPackCuration.find_orphaned_bundles` reports bundles left by upstream
+        deletes #1609
+    - Add v2 `describe_review_profiles`, `RunResult.summary()`,
+        `SorterParameters.missing_row_fix` and `preflight_v2_concat_pipeline`,
+        which returns a `PreflightReport` listing every concat problem, each
+        member's prefixed `concat member {i}: ` #1609
+    - v2 runs log each stage at INFO and end with a `done in N s` line. A
+        `PipelineStageError` names the entry point, its target and the stages that
+        finished, and says to re-run the same call. A passing preflight logs one
+        line with its plan; a blocked one raises `PreflightError` naming the run,
+        one bullet per problem #1609
+    - v2 run warnings also appear on reused runs: a sort interval clipped to the
+        raw data, a requested phase shift that was skipped, and channels a motion
+        correction removed or extrapolated. The scientific setup has a `geometry`
+        row saying whether contact positions are registered or the `tetrode_12.5`
+        square is assumed #1609
+    - v2 run entry points raise `PipelineInputError` naming the entry point for a
+        malformed manual exclusion or, with `preflight=False`, a missing motion
+        recipe; `ZeroUnitSortError` names the entry point and target #1609
+    - v2 quality metrics and `template_metrics` are computed at the sort's
+        `peak_sign`. Template metrics of the shipped negative sorts can change,
+        since SpikeInterface's default is `"both"`; a stored `template_metrics` at
+        other params is recomputed once, with a warning #1609
+    - v2 unit matching: add `UnitMatch.MatchableUnit.compared` and
+        `allow_divergent_electrodes` (on `UnitMatchSelection.insert_inputs` and
+        `run_v2_unit_match`); `TrackedUnit` groups units by greedy
+        complete-linkage; UnitMatch needs 28 samples on each side of the trough
+        and at least 3 units #1609
+    - v2 `ConcatenatedRecordingSelection.MemberSnapshot` references `Recording`,
+        so deleting a member's `Recording` cascades to the concat #1609
+    - v2 `SharedGroupArtifactSelection` and `SharedGroupArtifactDetection` are
+        renamed `SharedArtifactSelection` and `SharedArtifactDetection`, and the
+        `ArtifactDetectionOutput` parts are named after their source tables, so
+        the generic merge methods work on it #1609
+    - v2 `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection` and
+        `RecordingArtifactRecompute` are renamed `RecordingRecomputeVersions`,
+        `RecordingRecomputeSelection` and `RecordingRecompute`, the v1 names
+        #1609
+    - v2 `UnitMatchSelection.InputRecording` references `Recording`,
+        `UnitMatch.MatchableUnit` references `CurationV2.Unit`, and
+        `UnitMatchSelection.Input` references `MotionCorrectedRecording`, so
+        none can name a missing row and exports follow them #1609
+    - v2 `Sorting.add_extensions` refuses non-default extension parameters (use
+        `CurationRef.open_analyzer(extra_extensions=...)`), and
+        `CurationEvaluation.get_waveforms(fetch_all=True)` raises #1609
+    - Remove v2 `DriftEstimate`. To flag high-drift sessions, use
+        `estimate_motion` and its `motion_diagnostics["max_abs_displacement_um"]`
+        or `MotionEstimate.max_abs_displacement_um` #1609
+    - v2 concatenated and motion-corrected recording NWB files store their
+        statistics and continuity spans (and a concat's member boundaries and
+        member kept intervals) once, as `TimeIntervals`, so a reader without the
+        database can tell masked samples and session joins apart; the scratch
+        span copies and the concat header's `obs_intervals` are no longer
+        written #1609
+    - v2 `PreprocessingParameters` drops its `job_kwargs` column, which the
+        recording stage never read; an insert with that key raises #1609
+    - v2 `Sorting.time_of_sort` is a `timestamp` the database server fills in, so
+        sorts run on machines in different time zones compare #1609
+    - v2 `describe_epochs` leaves out the interval rows that spike sorting
+        writes as results (recording kept times, artifact detections), unless
+        a recording was already selected over one #1609
+    - v2 `Recording` stores the times it was cut to in `IntervalList` (owned by
+        `Recording.ValidInterval`, named `recording_{recording_id}`, pipeline
+        `spikesorting_recording_v2`), as v1 does; read them with
+        `Recording().get_valid_interval(key)`. `Recording.delete` removes the
+        row and refuses while another table uses it #1609
+    - v2 `SortingAnalyzerVersions` records a `status` (`ok`, `zero_units`,
+        `missing_folder`); `analyzer_hash` holds only a real content hash and is
+        NULL unless `status` is `ok` #1609
+    - v2 `SharedArtifactGroup` is keyed by session and name, made with
+        `create_group(nwb_file_name, group_name, members)` (was `insert_group`),
+        and its members cannot change. A shared detection's id covers the
+        session and member set, and `SharedArtifactSelection.Member` freezes
+        the members it scans and may mask; `member_set_hash` and
+        `SharedArtifactGroupMemberDriftError` are removed #1609
+    - v2 `Recording` and `ConcatenatedRecording` store `sampling_frequency` and
+        their durations in double precision, and `Recording` stores the
+        `n_samples` of its saved file #1609
+    - v2 `SortingSelection` and `MotionEstimateSelection` store their source as
+        nullable columns (`recording_id` or `concat_recording_id`,
+        `artifact_detection_merge_id`, and for a sort
+        `motion_corrected_recording_id`) instead of source part tables, so a
+        delete of any source removes every selection over it, the delete
+        permission check finds the session of a single-session sort, and
+        `SortingSelection & {"recording_id": rid}` restricts by recording.
+        No id changes #1609
+    - v2 `CurationV2` never gives a `curation_id` twice while its
+        `SortingSelection` row exists (new `CurationIdCounter` table), so a
+        curation made after a delete gets a new number and merge id; a sort
+        still has one root, found by `parent_curation_id == -1` #1609
+    - v2 `CurationV2.insert_curation` serializes one sort's curations with a
+        MySQL named lock, raises `CurationLockTimeoutError` if it cannot take
+        it, and refuses to run inside an open transaction #1609
+    - v2 `curation_evaluation_id` includes the curation's `curation_uuid`, and
+        `CurationEvaluation.populate` refuses a selection whose curation was
+        replaced #1609
+    - v2 `UnitMatch.MatchableUnit` references its `UnitMatchSelection.Input`
+        and `UnitMatch.RecordingSpikeCount` its `InputRecording`; `Pair`,
+        `MatchableUnit` and `TrackedUnit.Member` inserts refuse units outside
+        the match, a unit is in at most one tracked unit of a match, and
+        `CurationV2.delete` also refuses while another table's part uses one
+        of its units #1609
+    - v2 `UnitMatch.Pair.match_probability` and
+        `TrackedUnit.median_match_probability` are `double`, so the table, the
+        pairs NWB and the tracking threshold see the same value #1609
+    - v2 parameter tables name their content blob `{stage}_params` after the
+        `{stage}_params_name` key (`preprocessing_params`, `sorter_params`,
+        `artifact_detection_params`, `waveform_params`,
+        `motion_estimation_params`, `motion_interpolation_params`,
+        `matcher_params`); a row with a `params` key is refused. No
+        fingerprint or id changes #1609
+    - v2 interval operations use `spyglass.utils.interval.Interval`, which
+        gains `merge_touching` on `intersect` and `consolidate` and intersects
+        disjoint lists in one pass. No stored value or id changes #1609
+    - v2 schema and API cleanups from review: `CurationV2.curation_source` is
+        `varchar(32)`; NWB `object_id` columns are `varchar(40)`; parameter,
+        rule-set, review-profile and preset names are `varchar(200)`; hash
+        columns are named by what they hash (`motion_input_hash`,
+        `analyzer_content_hash`, `figpack_params_hash`, `profile_params_hash`,
+        also `ReviewProfileRef.profile_params_hash`); recording trace and
+        timestamp digests use SHA-256 like the rest of v2, which changes
+        `content_hash` and the motion-estimate, UnitMatch and FigPack ids
+        built from these values; curation, member-export and evaluation
+        receipts record the GPU inventory as `not_recorded`;
+        `pipeline.__all__` lists the entry points and their handles, and the
+        report and summary types stay importable from `pipeline`. Existing v2
+        tables need the drop-and-declare above #1609
     - Respect `safemode` in `RecordingRecompute.delete` #1678
     - Split recording and artifact restrictions in merge-id lookup #1678
     - `SpikeSorting.get_sorting` returns a valid zero-unit sorting when no spikes
         #1678
+    - Match the v1 recompute environment with `nwb_hash.env_matches`: every
+        namespace in both the file and the session must agree, so an optional
+        extension loaded in the session (e.g. `ndx-pose`) no longer blocks
+        every recompute attempt, and `hdmf-common`, `hdmf-experimental` and
+        `ndx-franklab-novela` are compared (the old allowlist spelled them
+        with underscores, so it compared only `core`) #1713
 
 ## [0.6.0] (Sep 1st 2026)
 

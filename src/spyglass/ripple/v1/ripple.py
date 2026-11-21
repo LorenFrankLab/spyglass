@@ -4,7 +4,6 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import sortingview.views as vv
 from matplotlib.axes import Axes
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
@@ -440,6 +439,9 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         lfp_channel_ind=None,
     ):
         """Generate a FigURL for the ripple detection"""
+        # sortingview ships with the spikesorting extra
+        import sortingview.views as vv
+
         ripple_times = self.fetch1_dataframe()
 
         def _add_ripple_times(

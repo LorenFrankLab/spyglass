@@ -19,24 +19,24 @@ dependencies:
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
   - ipympl
-  - jax<0.7.2  # jax 0.7.2 requires numpy>=2/scipy>=1.13
+  - jax<0.10  # NLD 0.6.9 uses clip(a_min=, a_max=), removed in 0.10
   - jupyterlab>=3.*
   # - libgcc # dlc-only
   - matplotlib
-  - non_local_detector
-  - numpy<2  # spikeinterface 0.99.1 calls np.issctype, removed in numpy 2.0
+  - non_local_detector==0.6.9
+  - numpy>=2,<3
   - pip
-  - scipy<1.13  # spikeinterface 0.99.x uses scipy.linalg.tril, removed in 1.13
+  - scipy>=1.13  # numpy>=2; SI 0.104 needs scipy>=1.13
   - position_tools
-  - pybind11  # req by mountainsort4 -> isosplit5
+  # - pybind11 # dlc/moseq-only
   - pydotplus
   - python>=3.10,<3.13
-  - pytorch<1.12.0
+  # - pytorch # dlc/moseq-only; torch>=2 is a pip dep here
   - ripple_detection
   - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
   - track_linearization>=2.3
   - pip:
-      - mountainsort4
-      - ..
+      - torch>=2  # pip, not conda: conda pytorch>=2 forces numpy<2
+      - ..[spikesorting]  # ..[spikesorting-v2] adds MountainSort4/5

@@ -160,3 +160,30 @@ def test_teardown_failure_does_not_downgrade_existing_status(status):
 def test_escalation_is_a_noop_without_a_session():
     """No stashed session (e.g. session never started) must not raise."""
     escalate_exit_on_teardown_failure(None)
+
+
+def test_container_stop_removes_its_volume(monkeypatch):
+    """``stop`` removes the image's anonymous MySQL volume with the container."""
+    from types import SimpleNamespace
+
+    from tests.container import DockerMySQLManager
+
+    removed = []
+    fake = SimpleNamespace(
+        stop=lambda: None,
+        remove=lambda **kwargs: removed.append(kwargs),
+    )
+    monkeypatch.setattr(
+        DockerMySQLManager, "container", property(lambda _: fake)
+    )
+    monkeypatch.setattr(
+        DockerMySQLManager, "container_status", property(lambda _: "running")
+    )
+    manager = object.__new__(DockerMySQLManager)
+    manager.null_server = False
+    manager.container_name = "volume-test"
+    manager.vol_dir = None
+
+    manager.stop()
+
+    assert removed == [{"v": True}]

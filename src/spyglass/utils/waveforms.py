@@ -1,3 +1,5 @@
+from __future__ import annotations  # handles SI version issues
+
 import numpy as np
 import spikeinterface as si
 
@@ -21,7 +23,7 @@ def _get_peak_amplitude(
         Direction of the peak in the waveform. Defaults to 'neg'.
     estimate_peak_time : bool, optional
         If True, estimates the peak times for each spike because some
-        spikesorters do not align the spike time (at index n_time // 2)
+        spikesorters do not align the spike time (at index ``nbefore``)
         to the peak. Defaults to False.
 
     Returns
@@ -44,6 +46,7 @@ def _get_peak_amplitude(
         values, counts = np.unique(peak_inds, return_counts=True)
         spike_peak_ind = values[counts.argmax()]
     else:
-        spike_peak_ind = waveforms.shape[1] // 2
+        # Spike sits at nbefore, the midpoint only for symmetric windows.
+        spike_peak_ind = waveform_extractor.nbefore
 
     return waveforms[:, spike_peak_ind]

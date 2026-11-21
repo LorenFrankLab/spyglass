@@ -19,6 +19,11 @@ for path in sorted(Path("src/spyglass/").glob("**/*.py")):
     ):
         continue
     rel_path = path.relative_to("src/spyglass")
+    if rel_path.parts[:2] == ("spikesorting", "v2") and any(
+        part.startswith("_") for part in rel_path.parts[2:]
+    ):
+        # Only public v2 import paths are stable API.
+        continue
 
     # parts[0] is the src directory, ignore as of mkdocstrings-python 1.9.1
     module_path = ".".join([p for p in path.with_suffix("").parts[1:]])

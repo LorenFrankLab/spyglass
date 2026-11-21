@@ -100,9 +100,10 @@ sorter_keys = {
     "curation_id": 1,
 }
 
-# get the merge_ids for the selected sorting
+# get the merge_ids for the selected sorting. sources=["v1"]: a group cannot
+# mix v1 and v2 sorts, which a session sorted by both would otherwise match
 spikesorting_merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
-    sorter_keys, restrict_by_artifact=True
+    sorter_keys, sources=["v1"], restrict_by_artifact=True
 )
 
 keys = [{"merge_id": merge_id} for merge_id in spikesorting_merge_ids]
@@ -154,7 +155,7 @@ SortedSpikesGroup().fetch_spike_data(group_key)
 #
 # Spyglass uses the unit identification system:
 # `{"spikesorting_merge_id" : merge_id, "unit_id" : unit_id}"`,
-# where `unit_id` is the index of a units in the saved nwb file. `fetch_spike_data`
+# where `unit_id` is the id of a unit in the saved NWB units table. `fetch_spike_data`
 # can return these identifications by setting `return_unit_ids = True`
 
 spike_times, unit_ids = SortedSpikesGroup().fetch_spike_data(

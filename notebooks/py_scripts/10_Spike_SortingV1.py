@@ -317,8 +317,9 @@ selection_key = {
     "interval_list_name": "01_s1",
     "curation_id": 1,  # automatic curation, inserted above
 }  # this function can use restrictions from throughout the spikesorting pipeline
+# sources=["v1"]: a session sorted by v1 and v2 would otherwise match both
 spikesorting_merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
-    selection_key, as_dict=True
+    selection_key, sources=["v1"], as_dict=True
 )
 spikesorting_merge_ids
 

@@ -70,6 +70,39 @@ def test_criteria_missing_value_excluded(spike_v1_group, units_df):
     ), "Missing label not excluded by 'notin' on an object column"
 
 
+def test_criteria_nullable_missing_value_excluded(spike_v1_group):
+    """Missing values in nullable or object columns fail every criterion"""
+    filter_units_by_criteria = (
+        spike_v1_group.SortedSpikesGroup.filter_units_by_criteria
+    )
+
+    for values in (
+        pd.Series([1, None, 0], dtype="Int64"),
+        pd.Series([1.0, None, 0.0]),
+        pd.Series([1, None, 0], dtype=object),
+    ):
+        for criterion in (
+            {">": 0},
+            {"!=": 0},
+            {"notin": [0]},
+            {"between": [1, 2]},
+        ):
+            mask = filter_units_by_criteria(
+                values.to_frame("value"), {"value": criterion}
+            )
+            expected = [True, False, False]
+            assert mask.tolist() == expected, f"{criterion} on {values.dtype}"
+
+    assert filter_units_by_criteria(
+        pd.DataFrame({"labels": [[], ["noise"], None, pd.NA]}),
+        {"labels": {"notin": ["noise"]}},
+    ).tolist() == [True, False, False, False], "pd.NA label not excluded"
+    assert not filter_units_by_criteria(
+        pd.DataFrame({"flag": pd.array([None, None], dtype="boolean")}),
+        {"flag": {"!=": False}},
+    ).any(), "All-missing boolean column passed '!='"
+
+
 def test_criteria_range(spike_v1_group, units_df):
     """'between' and 'outside' bounds are inclusive"""
     filter_units_by_criteria = (

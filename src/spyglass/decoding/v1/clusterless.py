@@ -38,6 +38,7 @@ from spyglass.decoding.v1.waveform_features import (
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.mixins.populate import StagedOutputs
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 if TYPE_CHECKING:  # annotations only: never import non_local_detector eagerly
@@ -63,6 +64,10 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         self, nwb_file_name: str, group_name: str, keys: list[dict]
     ):
         """Create a group of waveform features for a given session"""
+        from spyglass.spikesorting.spikesorting_merge import (
+            SpikeSortingOutput,
+        )
+
         group_key = {
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
@@ -73,6 +78,11 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
                 + "please delete the group before creating a new one",
             )
             return
+        # After the duplicate return: keys for an existing group are unused
+        merge_ids = [k.get("spikesorting_merge_id") for k in keys]
+        SpikeSortingOutput.assert_decoding_merge_ids_ok(
+            merge_ids, nwb_file_name=nwb_file_name
+        )
         self.insert1(
             group_key,
             skip_duplicates=True,
@@ -219,6 +229,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         from spyglass.decoding.decoding_merge import DecodingOutput
 
         DecodingOutput.insert1(key, skip_duplicates=True)
+
+    def _staged_outputs(self, computed: list) -> StagedOutputs:
+        """Result files ``make_compute`` saved, removed if populate fails."""
+        (self_insert,) = computed
+        return StagedOutputs(
+            paths=(self_insert["results_path"], self_insert["classifier_path"])
+        )
 
     def _run_decoder(
         self,
@@ -639,15 +656,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
         waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ],
-                }
-            )
+            UnitWaveformFeaturesGroup.UnitFeatures
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "waveform_features_group_name": key[
+                    "waveform_features_group_name"
+                ],
+            }
         ).fetch("KEY")
         spike_times, spike_waveform_features = (
             UnitWaveformFeatures & waveform_keys

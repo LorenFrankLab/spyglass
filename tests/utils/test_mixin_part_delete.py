@@ -198,3 +198,23 @@ def test_unrestricted_delete_removes_master(populated):
 
     assert len(master) == 0, "Master entries not deleted"
     assert len(part) == 0, "Part entries not deleted"
+
+
+def test_positional_restr_promotes_to_master(populated):
+    """A positional restriction is applied before promotion to the master."""
+    master, part = populated
+
+    part.delete({"master_id": 1})
+
+    assert len(master) == 1, "Positional restriction not applied to master"
+    assert len(part) == 2, "Part entries not cascaded"
+
+
+def test_positional_restr_with_force(populated):
+    """A positional restriction limits a forced part-only delete."""
+    master, part = populated
+
+    part.delete({"item_id": 1}, force=True)
+
+    assert len(part) == 2, "Positional restriction not applied with force"
+    assert len(master) == 2, "Master entries deleted with force"

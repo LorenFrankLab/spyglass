@@ -31,12 +31,45 @@ def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     """
     catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
     pynwb.NWBHDF5IO.load_namespaces(catalog, file_path)
-    name_cat = TypeMap(catalog).namespace_catalog
+    return get_namespace_versions(TypeMap(catalog))
 
+
+def get_namespace_versions(type_map: TypeMap) -> dict:
+    """Get all namespace versions registered in a type map (e.g. pynwb's)."""
+    name_cat = type_map.namespace_catalog
     return {
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces
     }
+
+
+def env_matches(file_deps: Union[dict, None], env_deps: dict) -> bool:
+    """Whether a file's namespace versions are reproducible in ``env_deps``.
+
+    Compatible if every namespace in both agrees on version. Namespaces only
+    in the file are ignored, because extensions register lazily; namespaces
+    only in the environment are ignored, because the file did not use them.
+    No deps, or no shared namespace, is incompatible.
+
+    Parameters
+    ----------
+    file_deps : dict or None
+        Namespace name to version, as inventoried from the file.
+    env_deps : dict
+        Namespace name to version in this process, e.g.
+        ``get_namespace_versions(pynwb.get_manager().type_map)``.
+
+    Returns
+    -------
+    bool
+        True if the shared namespaces all agree.
+    """
+    if not file_deps:
+        return False
+    shared = set(file_deps) & set(env_deps)
+    if not shared:
+        return False
+    return all(file_deps[ns] == env_deps[ns] for ns in shared)
 
 
 DIGESTS = {"sha256": sha256, "md5": md5}
@@ -537,3 +570,71 @@ class NwbfileHasher:
             self.add_to_cache(name, obj, this_digest)
 
         return self.hashed.hexdigest()
+
+
+def electrode_coordinates(electrical_series: pynwb.ecephys.ElectricalSeries):
+    """Return an ElectricalSeries' electrode coordinates in region order.
+
+    Parameters
+    ----------
+    electrical_series : pynwb.ecephys.ElectricalSeries
+        A series read from an open file.
+
+    Returns
+    -------
+    np.ndarray
+        ``(n_channels, n_coords)`` float64 of the ``rel_x`` / ``rel_y`` /
+        ``rel_z`` columns the electrodes table has; ``n_coords`` is 0 when it
+        has none.
+    """
+    region = electrical_series.electrodes
+    table = region.table
+    coord_cols = [c for c in ("rel_x", "rel_y", "rel_z") if c in table.colnames]
+    # One read per column, not per h5py element.
+    columns = [
+        np.asarray(table[col].data[:], dtype=np.float64) for col in coord_cols
+    ]
+    return np.asarray(
+        [
+            [float(column[int(row)]) for column in columns]
+            for row in region.data[:]
+        ],
+        dtype=np.float64,
+    )
+
+
+def electrode_geometry_hash(coords) -> str:
+    """Hash a ``(n_channels, n_coords)`` probe-geometry array.
+
+    Prefixed with the shape so a transpose or channel-count change cannot
+    collide.
+
+    Parameters
+    ----------
+    coords : array-like
+        ``(n_channels, n_coords)`` electrode coordinates, ``n_coords >= 1``.
+
+    Returns
+    -------
+    str
+        The md5 hex digest of the shape and little-endian float64 bytes.
+
+    Raises
+    ------
+    ValueError
+        If ``coords`` is not 2-D or has no coordinate columns.
+    """
+    arr = np.ascontiguousarray(
+        np.asarray(coords, dtype=np.float64).astype("<f8")
+    )
+    if arr.ndim != 2 or arr.shape[1] == 0:
+        raise ValueError(
+            "electrode_geometry_hash: expected a (n_channels, n_coords>=1) "
+            f"array but got shape {arr.shape} -- the persisted electrodes "
+            "region carries no rel_x/rel_y[/rel_z] coordinates (no probe "
+            "geometry). Refusing to hash an empty geometry component."
+        )
+    digest = md5()
+    digest.update(str(arr.shape).encode())
+    digest.update(arr.tobytes())
+    return digest.hexdigest()
