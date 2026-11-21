@@ -42,7 +42,7 @@ from spyglass.spikesorting.v2._storage.staged_outputs import (
     StagedOutputCleanupMixin,
 )
 from spyglass.spikesorting.v2._matching.inputs import (
-    _validate_member_curations,
+    validate_member_curations,
     normalize_curation_choices,
 )
 from spyglass.spikesorting.v2.curation import CurationV2  # noqa: F401
@@ -92,71 +92,6 @@ from spyglass.spikesorting.v2.matcher_protocol import (
 from spyglass.spikesorting.v2.sorting import SortingSelection
 
 schema = dj.schema("spikesorting_v2_unit_matching")
-
-
-class UnitMatchFetched(NamedTuple):
-    """Validated inputs for ``UnitMatch.make_compute``.
-
-    ``input_plan`` is the chronological list of per-input DeepHash-stable
-    dicts built from the frozen ``Input`` / ``InputRecording`` rows:
-
-    - ``input_index``, ``sorting_id`` (str), ``curation_id``,
-      ``curation_uuid`` (str), ``source_kind``, ``source_id`` (str),
-      ``input_start_time`` (UTC ISO 8601 str)
-    - ``recordings``: one dict per constituent recording with
-      ``recording_index``, ``nwb_file_name``, ``sort_group_id``,
-      ``interval_list_name``, ``recording_id`` (str),
-      ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
-      ``start_sample``, ``end_sample``, ``valid_times`` (nested list),
-      ``source_coverage`` (dict)
-    - ``selection_snapshot`` (dict), ``matchable_unit_ids`` (frozen
-      list[int]), ``waveform_traces`` (str),
-      ``motion_corrected_recording_id`` (str or None)
-    - ``units`` (StoredUnits): curated units NWB, for every input
-    - ``sorting_input`` (CanonicalRecording) and ``statistics_spans``
-      (list of ``[start, end]`` sort frames): only for two or more inputs
-
-    ``matchable_unit_ids`` is carried, not re-queried, so a relabel between
-    stages cannot change which units match. ``sorting_input`` keeps
-    ``uuid.UUID`` values; DeepHash hashes them by value.
-    """
-
-    matcher_name: str
-    params: dict
-    job_kwargs: dict
-    input_plan: list[dict]
-    # Provenance for the NWB only; group fields are None for explicit inputs.
-    session_group_owner: str | None
-    session_group_name: str | None
-    matcher_params_name: str
-
-
-class UnitMatchComputed(NamedTuple):
-    """Compute -> insert carrier (DeepHash-stable scalars only).
-
-    ``make_insert`` reads the pair rows back from the staged NWB.
-    """
-
-    analysis_file_name: str
-    pairs_object_id: str
-    n_pairs: int
-    matcher_runtime_s: float
-    anchor_nwb_file_name: str
-    # Frozen ``{"input_index", "sorting_id", "curation_id", "unit_id"}`` rows
-    # for ``UnitMatch.MatchableUnit``.
-    matchable_units: list[dict]
-    # ``{"input_index", "recording_index", "unit_id", "n_spikes"}`` rows for
-    # ``UnitMatch.RecordingSpikeCount``.
-    recording_spike_counts: list[dict]
-    # Producer provenance; secondary, not identity.
-    spikeinterface_version: str
-    matcher_backend: str
-    matcher_backend_version: str | None
-    matcher_provenance: dict
-
-    def staged_outputs(self) -> StagedOutputs:
-        """The staged analysis file ``make_insert`` registers."""
-        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
 
 
 @schema
@@ -457,7 +392,7 @@ class UnitMatchSelection(SpyglassMixin, SelectionMasterInsertGuard, dj.Manual):
             )
         choices_by_member = normalize_curation_choices(curation_choices)
         # Check coverage and member ownership before any row is written.
-        _validate_member_curations(members, choices_by_member)
+        validate_member_curations(members, choices_by_member)
         return cls.insert_inputs(
             [
                 {
@@ -713,6 +648,71 @@ def _matchable_nodes(unitmatch_id) -> set:
             )
         )
     }
+
+
+class UnitMatchFetched(NamedTuple):
+    """Validated inputs for ``UnitMatch.make_compute``.
+
+    ``input_plan`` is the chronological list of per-input DeepHash-stable
+    dicts built from the frozen ``Input`` / ``InputRecording`` rows:
+
+    - ``input_index``, ``sorting_id`` (str), ``curation_id``,
+      ``curation_uuid`` (str), ``source_kind``, ``source_id`` (str),
+      ``input_start_time`` (UTC ISO 8601 str)
+    - ``recordings``: one dict per constituent recording with
+      ``recording_index``, ``nwb_file_name``, ``sort_group_id``,
+      ``interval_list_name``, ``recording_id`` (str),
+      ``recording_content_hash``, ``session_start_time`` (UTC ISO str),
+      ``start_sample``, ``end_sample``, ``valid_times`` (nested list),
+      ``source_coverage`` (dict)
+    - ``selection_snapshot`` (dict), ``matchable_unit_ids`` (frozen
+      list[int]), ``waveform_traces`` (str),
+      ``motion_corrected_recording_id`` (str or None)
+    - ``units`` (StoredUnits): curated units NWB, for every input
+    - ``sorting_input`` (CanonicalRecording) and ``statistics_spans``
+      (list of ``[start, end]`` sort frames): only for two or more inputs
+
+    ``matchable_unit_ids`` is carried, not re-queried, so a relabel between
+    stages cannot change which units match. ``sorting_input`` keeps
+    ``uuid.UUID`` values; DeepHash hashes them by value.
+    """
+
+    matcher_name: str
+    params: dict
+    job_kwargs: dict
+    input_plan: list[dict]
+    # Provenance for the NWB only; group fields are None for explicit inputs.
+    session_group_owner: str | None
+    session_group_name: str | None
+    matcher_params_name: str
+
+
+class UnitMatchComputed(NamedTuple):
+    """Compute -> insert carrier (DeepHash-stable scalars only).
+
+    ``make_insert`` reads the pair rows back from the staged NWB.
+    """
+
+    analysis_file_name: str
+    pairs_object_id: str
+    n_pairs: int
+    matcher_runtime_s: float
+    anchor_nwb_file_name: str
+    # Frozen ``{"input_index", "sorting_id", "curation_id", "unit_id"}`` rows
+    # for ``UnitMatch.MatchableUnit``.
+    matchable_units: list[dict]
+    # ``{"input_index", "recording_index", "unit_id", "n_spikes"}`` rows for
+    # ``UnitMatch.RecordingSpikeCount``.
+    recording_spike_counts: list[dict]
+    # Producer provenance; secondary, not identity.
+    spikeinterface_version: str
+    matcher_backend: str
+    matcher_backend_version: str | None
+    matcher_provenance: dict
+
+    def staged_outputs(self) -> StagedOutputs:
+        """The staged analysis file ``make_insert`` registers."""
+        return StagedOutputs(analysis_file_names=(self.analysis_file_name,))
 
 
 @schema

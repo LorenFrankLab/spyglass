@@ -2,17 +2,19 @@
 
 A *matcher* takes prepared bundles, one per matching input, and returns
 pairwise cross-session unit matches. Backends (UnitMatch is built in) plug in
-without touching the DataJoint tables:
+without touching the DataJoint tables. The module reads top to bottom: the
+contracts, the payloads they are written in, then the registry.
 
+- :class:`MatcherProtocol`: the ``match(session_inputs, params)`` contract.
+- :class:`MatcherGeometryValidator`: optional backend geometry preflight.
+- :class:`MatcherInputPreparer`: preparation from
+  :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
+- :class:`MatcherProvenanceProvider`: optional model and feature fingerprints.
 - :class:`SessionMatcherInput`: one prepared bundle per matching input (a
   sort of one recording or of a same-day concatenation). The matcher reads
   only these directories, never analyzers, recordings, or table keys.
 - :class:`MatchPair`: one cross-session match, keyed by
   ``(sorting_id, curation_id, unit_id)`` on each side.
-- :class:`MatcherProtocol`: the ``match(session_inputs, params)`` contract.
-- :class:`MatcherGeometryValidator`: optional backend geometry preflight.
-- :class:`MatcherInputPreparer`: preparation from
-  :class:`MatcherInputSource` to :class:`PreparedMatcherInput`.
 - :func:`register_matcher` / :func:`get_matcher`: the registry of name to
   backend, input preparer, and params schema that ``MatcherParameters``
   validates against.
@@ -31,6 +33,110 @@ from spyglass.spikesorting.v2.exceptions import UnknownMatcherError
 
 WAVEFORM_BUNDLE_LAYOUT = "split_half_waveforms"
 WAVEFORM_BUNDLE_VERSION = 1
+
+
+@runtime_checkable
+class MatcherProtocol(Protocol):
+    """Structural interface every cross-session matcher backend implements.
+
+    A backend is any object with a ``name`` string and a ``match`` method; it
+    need not subclass anything. ``match`` consumes wrapper-prepared bundles and
+    returns the cross-session matches, returning ``[]`` for the degenerate
+    single-session case (one input) rather than raising.
+    An optional ``backend_version() -> str | None`` records its library version;
+    :class:`MatcherProvenanceProvider` can record model/feature fingerprints.
+    """
+
+    name: str
+
+    def match(
+        self,
+        session_inputs: list[SessionMatcherInput],
+        params: dict,
+    ) -> list[MatchPair]:
+        """Match units across the prepared per-input bundles.
+
+        Parameters
+        ----------
+        session_inputs : list[SessionMatcherInput]
+            One wrapper-prepared bundle per matching input, in ``input_index``
+            (chronological) order. Each bundle's ``curation_key`` is the
+            identity the matcher echoes back on the pairs it returns.
+        params : dict
+            The matcher's ``MatcherParameters.matcher_params`` blob,
+            validated at insert time against the params schema registered with
+            this backend (see :func:`register_matcher`).
+
+        Returns
+        -------
+        list[MatchPair]
+            One :class:`MatchPair` per matched unit pair, each side identified
+            by the ``(sorting_id, curation_id)`` of an input's
+            ``curation_key`` plus a unit id from that input's bundle. The two
+            sides must come from different inputs, every key must be one of
+            the ``curation_key`` values passed in, and an unordered pair must
+            appear at most once (not also in reversed orientation). Order is
+            not significant. Curation and unit IDs must be Python or NumPy
+            integers; booleans, floats and strings are rejected. Units
+            excluded by preparation cannot appear in pairs.
+            The caller orients and orders the pairs, and
+            ``UnitMatch.make`` raises ``ValueError`` on a pair that breaks
+            these rules. ``[]`` when fewer than two inputs are given or
+            nothing matches.
+        """
+        ...
+
+
+@runtime_checkable
+class MatcherGeometryValidator(Protocol):
+    """Optional geometry requirements owned by a matcher backend.
+
+    Selection calls this before inserting a new multi-input selection. Arrays
+    are the effective channel positions of the curated recordings, in input
+    order; labels identify inputs for errors. The validated matcher parameters
+    allow a backend to choose its own geometry policy. Raise ``ValueError``
+    for unsupported geometry. No table or recording objects are passed.
+
+    Backends without this hook impose no selection-time geometry requirement.
+    Inference must also validate the actual prepared geometry it consumes;
+    input preparation may transform it after this preflight.
+    """
+
+    def validate_geometry(
+        self, named_positions: list[tuple[Any, Any]], params: dict
+    ) -> None: ...
+
+
+@runtime_checkable
+class MatcherInputPreparer(Protocol):
+    """Prepare one input in the layout required by a registered matcher.
+
+    An optional ``preparer_version() -> str | None`` records its implementation
+    version. Both preparers and backends may implement
+    :class:`MatcherProvenanceProvider` to describe result-determining assets.
+    """
+
+    def prepare(
+        self,
+        source: MatcherInputSource,
+        directory: Path,
+        params: dict,
+        job_kwargs: dict,
+    ) -> PreparedMatcherInput: ...
+
+
+@runtime_checkable
+class MatcherProvenanceProvider(Protocol):
+    """Optional model/feature-definition fingerprints for producer provenance.
+
+    Return named fingerprints as nonempty strings. This metadata does not
+    change run identity: result-determining fingerprints must also be fields
+    in the producer's immutable parameter schema, and the producer must verify
+    the loaded assets against them. The hook must not run inference or prepare
+    files; it is also called for a single-input run that skips those operations.
+    """
+
+    def provenance_fingerprints(self, params: dict) -> dict[str, str]: ...
 
 
 @dataclass(frozen=True, init=False)
@@ -155,110 +261,6 @@ class PreparedMatcherInput:
     session_input: SessionMatcherInput
     excluded_unit_ids: tuple[int, ...] = ()
     exclusion_reason: str = ""
-
-
-@runtime_checkable
-class MatcherInputPreparer(Protocol):
-    """Prepare one input in the layout required by a registered matcher.
-
-    An optional ``preparer_version() -> str | None`` records its implementation
-    version. Both preparers and backends may implement
-    :class:`MatcherProvenanceProvider` to describe result-determining assets.
-    """
-
-    def prepare(
-        self,
-        source: MatcherInputSource,
-        directory: Path,
-        params: dict,
-        job_kwargs: dict,
-    ) -> PreparedMatcherInput: ...
-
-
-@runtime_checkable
-class MatcherProvenanceProvider(Protocol):
-    """Optional model/feature-definition fingerprints for producer provenance.
-
-    Return named fingerprints as nonempty strings. This metadata does not
-    change run identity: result-determining fingerprints must also be fields
-    in the producer's immutable parameter schema, and the producer must verify
-    the loaded assets against them. The hook must not run inference or prepare
-    files; it is also called for a single-input run that skips those operations.
-    """
-
-    def provenance_fingerprints(self, params: dict) -> dict[str, str]: ...
-
-
-@runtime_checkable
-class MatcherGeometryValidator(Protocol):
-    """Optional geometry requirements owned by a matcher backend.
-
-    Selection calls this before inserting a new multi-input selection. Arrays
-    are the effective channel positions of the curated recordings, in input
-    order; labels identify inputs for errors. The validated matcher parameters
-    allow a backend to choose its own geometry policy. Raise ``ValueError``
-    for unsupported geometry. No table or recording objects are passed.
-
-    Backends without this hook impose no selection-time geometry requirement.
-    Inference must also validate the actual prepared geometry it consumes;
-    input preparation may transform it after this preflight.
-    """
-
-    def validate_geometry(
-        self, named_positions: list[tuple[Any, Any]], params: dict
-    ) -> None: ...
-
-
-@runtime_checkable
-class MatcherProtocol(Protocol):
-    """Structural interface every cross-session matcher backend implements.
-
-    A backend is any object with a ``name`` string and a ``match`` method; it
-    need not subclass anything. ``match`` consumes wrapper-prepared bundles and
-    returns the cross-session matches, returning ``[]`` for the degenerate
-    single-session case (one input) rather than raising.
-    An optional ``backend_version() -> str | None`` records its library version;
-    :class:`MatcherProvenanceProvider` can record model/feature fingerprints.
-    """
-
-    name: str
-
-    def match(
-        self,
-        session_inputs: list[SessionMatcherInput],
-        params: dict,
-    ) -> list[MatchPair]:
-        """Match units across the prepared per-input bundles.
-
-        Parameters
-        ----------
-        session_inputs : list[SessionMatcherInput]
-            One wrapper-prepared bundle per matching input, in ``input_index``
-            (chronological) order. Each bundle's ``curation_key`` is the
-            identity the matcher echoes back on the pairs it returns.
-        params : dict
-            The matcher's ``MatcherParameters.matcher_params`` blob,
-            validated at insert time against the params schema registered with
-            this backend (see :func:`register_matcher`).
-
-        Returns
-        -------
-        list[MatchPair]
-            One :class:`MatchPair` per matched unit pair, each side identified
-            by the ``(sorting_id, curation_id)`` of an input's
-            ``curation_key`` plus a unit id from that input's bundle. The two
-            sides must come from different inputs, every key must be one of
-            the ``curation_key`` values passed in, and an unordered pair must
-            appear at most once (not also in reversed orientation). Order is
-            not significant. Curation and unit IDs must be Python or NumPy
-            integers; booleans, floats and strings are rejected. Units
-            excluded by preparation cannot appear in pairs.
-            The caller orients and orders the pairs, and
-            ``UnitMatch.make`` raises ``ValueError`` on a pair that breaks
-            these rules. ``[]`` when fewer than two inputs are given or
-            nothing matches.
-        """
-        ...
 
 
 #: name -> backend instance
