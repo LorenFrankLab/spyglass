@@ -846,6 +846,8 @@ class SpyglassConfig:
                     "temp": self.temp_dir,
                     "video": self.video_dir,
                     "export": self.export_dir,
+                    "analyzer": self.analyzer_dir,
+                    "figpack": self.figpack_dir,
                 },
                 "kachery_dirs": {
                     "cloud": self.config.get(
@@ -923,6 +925,16 @@ class SpyglassConfig:
     def export_dir(self) -> str:
         """Export directory as a string."""
         return self.config.get(self.dir_to_var("export"))
+
+    @property
+    def analyzer_dir(self) -> str:
+        """Spike sorting v2 SortingAnalyzer cache directory as a string."""
+        return self.config.get(self.dir_to_var("analyzer"))
+
+    @property
+    def figpack_dir(self) -> str:
+        """Spike sorting v2 FigPack review bundle directory as a string."""
+        return self.config.get(self.dir_to_var("figpack"))
 
     @property
     def debug_mode(self) -> bool:
@@ -1129,6 +1141,17 @@ class SpyglassConfig:
             self._config["store_auto_upload"] = self._store_auto_upload
 
     @property
+    def figpack_api_key(self) -> "str | None":
+        """API key for publishing figpack.org figures, or None if unset.
+
+        Read from `dj.config['custom']['figpack_api_key']`, else the
+        `FIGPACK_API_KEY` environment variable.
+        """
+        return dj.config.get("custom", {}).get(
+            "figpack_api_key"
+        ) or os.environ.get("FIGPACK_API_KEY")
+
+    @property
     def dlc_project_dir(self) -> str:
         """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))
@@ -1186,6 +1209,8 @@ if sg_config.load_failed:  # Failed to load
     waveforms_dir = None
     video_dir = None
     export_dir = None
+    analyzer_dir = None
+    figpack_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -1202,6 +1227,8 @@ else:
     waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
     export_dir = sg_config.export_dir
+    analyzer_dir = sg_config.analyzer_dir
+    figpack_dir = sg_config.figpack_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)

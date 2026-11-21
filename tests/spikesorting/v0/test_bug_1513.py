@@ -377,10 +377,7 @@ class TestFix1513Status:
             ):
                 pass
 
-                with patch(
-                    "spyglass.spikesorting.v0.spikesorting_curation"
-                    ".LabMember"
-                ):
+                with patch("spyglass.common.LabMember"):
                     table.make(key, action="keep")
                 mock_insert.assert_called_once()
                 call_kwargs = mock_insert.call_args[0][0]
@@ -392,12 +389,11 @@ class TestFix1513Status:
         from unittest.mock import patch
 
         key = {**self._make_key(), "sorter": "clusterless_thresholder"}
-        module = "spyglass.spikesorting.v0.spikesorting_curation"
 
         with (
             patch.object(table, "_compute_label_diff") as mock_diff,
             patch.object(table, "insert1") as mock_insert,
-            patch(f"{module}.LabMember"),
+            patch("spyglass.common.LabMember"),
         ):
             table.make(key, action="keep")
 
@@ -412,12 +408,11 @@ class TestFix1513Status:
         from unittest.mock import patch
 
         key = {**self._make_key(), "sorter": "clusterless_thresholder"}
-        module = "spyglass.spikesorting.v0.spikesorting_curation"
 
         with (
             patch.object(table, "_compute_label_diff") as mock_diff,
             patch.object(table, "insert1") as mock_insert,
-            patch(f"{module}.LabMember"),
+            patch("spyglass.common.LabMember"),
         ):
             table.make(key, action="none_needed_only")
 
@@ -430,14 +425,13 @@ class TestFix1513Status:
         from unittest.mock import patch
 
         key = {**self._make_key(), "sorter": "mountainsort4"}
-        module = "spyglass.spikesorting.v0.spikesorting_curation"
 
         with (
             patch.object(
                 table, "_compute_label_diff", return_value=None
             ) as mock_diff,
             patch.object(table, "insert1") as mock_insert,
-            patch(f"{module}.LabMember"),
+            patch("spyglass.common.LabMember"),
         ):
             table.make(key, action="keep")
 
@@ -502,7 +496,7 @@ class TestFix1513Status:
             with patch.object(table, "insert1") as mock_ins:
                 pass
 
-                with patch(f"{module}.LabMember"):
+                with patch("spyglass.common.LabMember"):
                     table.make(key, action="keep")
                 row = mock_ins.call_args[0][0]
                 assert row["action"] == "none_needed"
@@ -703,7 +697,7 @@ class TestFix1513Status:
             patch.object(table, "insert1"),
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -749,7 +743,7 @@ class TestFix1513Status:
             patch.object(table, "_check_permission", return_value="alice"),
             patch.object(table, "_print_diff"),
             patch(f"{module}.Curation") as mock_curation,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -783,7 +777,7 @@ class TestFix1513Status:
             patch.object(table, "_check_permission", return_value="alice"),
             patch.object(table, "_print_diff"),
             patch(f"{module}.Curation") as mock_curation,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -839,7 +833,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting"),
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -874,7 +868,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting"),
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -911,7 +905,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation"),
             patch(f"{module}.CuratedSpikeSorting"),
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -936,7 +930,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation"),
             patch(f"{module}.CuratedSpikeSorting"),
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -962,7 +956,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -1006,7 +1000,7 @@ class TestFix1513Status:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
             patch("builtins.input", return_value="u"),
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -1223,7 +1217,7 @@ class TestNwbTransactionSafety:
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -1260,7 +1254,7 @@ class TestNwbTransactionSafety:
             patch.object(table, "_repair_unit_labels"),
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
@@ -1301,7 +1295,7 @@ class TestNwbTransactionSafety:
             patch.object(table, "insert1"),
             patch(f"{module}.Curation"),
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
-            patch(f"{module}.LabMember") as mock_lm,
+            patch("spyglass.common.LabMember") as mock_lm,
         ):
             mock_stage.return_value = []
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -1479,7 +1473,7 @@ class TestFix1513PopulateIntegration:
                 ),
                 patch.object(Fix1513Status, "_print_diff"),
                 patch(f"{module}.CuratedSpikeSorting") as mock_css,
-                patch(f"{module}.LabMember") as mock_lm,
+                patch("spyglass.common.LabMember") as mock_lm,
             ):
                 mock_lm.return_value.get_djuser_name.return_value = "alice"
                 mock_lm.return_value.admin = []
@@ -1538,7 +1532,7 @@ class TestFix1513PopulateIntegration:
                 # No CuratedSpikeSorting rows for this key, so the
                 # transaction-bound delete() inside make() is a no-op.
                 patch(f"{module}.CuratedSpikeSorting") as mock_css,
-                patch(f"{module}.LabMember") as mock_lm,
+                patch("spyglass.common.LabMember") as mock_lm,
             ):
                 mock_lm.return_value.get_djuser_name.return_value = "alice"
                 mock_lm.return_value.admin = []
@@ -1617,7 +1611,7 @@ class TestFix1513PopulateIntegration:
                 ),
                 patch.object(Fix1513Status, "_repair_unit_labels"),
                 patch(f"{module}.CuratedSpikeSorting") as mock_css,
-                patch(f"{module}.LabMember") as mock_lm,
+                patch("spyglass.common.LabMember") as mock_lm,
             ):
                 mock_lm.return_value.get_djuser_name.return_value = "alice"
                 mock_lm.return_value.admin = []

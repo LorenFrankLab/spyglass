@@ -927,12 +927,12 @@ class TestDockerManagerValidateEnvFile:
 class TestBuildDirectoryStructure:
     """Tests for build_directory_structure()."""
 
-    def test_creates_all_16_directories(self, tmp_path):
-        """Creates all 16 expected directories."""
+    def test_creates_all_18_directories(self, tmp_path):
+        """Creates all 18 expected directories."""
         base_dir = tmp_path / "spyglass_data"
         dirs = build_directory_structure(base_dir, create=True, verbose=False)
 
-        assert len(dirs) == 16
+        assert len(dirs) == 18
         for name, path in dirs.items():
             assert path.exists(), f"Directory {name} not created"
 
@@ -941,7 +941,7 @@ class TestBuildDirectoryStructure:
         base_dir = tmp_path / "spyglass_data"
         dirs = build_directory_structure(base_dir, create=False, verbose=False)
 
-        assert len(dirs) == 16
+        assert len(dirs) == 18
         assert not base_dir.exists()
 
     def test_creates_expected_prefixes(self, tmp_path):
@@ -1502,6 +1502,8 @@ class TestLoadDirectorySchema:
             "temp",
             "video",
             "export",
+            "analyzer",
+            "figpack",
         }
         assert set(schema["spyglass"].keys()) == expected
 
@@ -1663,6 +1665,8 @@ class TestCreateDatabaseConfig:
             "temp",
             "video",
             "export",
+            "analyzer",
+            "figpack",
         }
         assert set(spyglass_dirs.keys()) == expected_keys
 
@@ -2285,6 +2289,8 @@ class TestConfigCompatibility:
                     "temp": str(dirs["spyglass_temp"]),
                     "video": str(dirs["spyglass_video"]),
                     "export": str(dirs["spyglass_export"]),
+                    "analyzer": str(dirs["spyglass_analyzer"]),
+                    "figpack": str(dirs["spyglass_figpack"]),
                 },
                 "kachery_dirs": {
                     "cloud": str(dirs["kachery_cloud"]),

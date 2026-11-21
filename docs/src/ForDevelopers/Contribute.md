@@ -35,6 +35,18 @@ The local version is dynamically managed via `hatch`, so be sure to run
     - Refers to a set of tables used for processing data of a particular modality
         (e.g., LFP, spike sorting, position tracking).
     - May span multiple schema.
+- Modules inside a pipeline
+    - Table modules and public functions sit at the package root, without a
+        leading underscore.
+    - Helpers for a few table modules can share one `utils.py`.
+    - When helpers outgrow one file, group them in private packages named
+        by domain with a leading underscore (e.g., `spikesorting/v2/_recording`,
+        `spikesorting/v2/_sorting`). The underscore marks code with no stability
+        guarantee, so the modules inside need none of their own.
+    - Code shared by several of those domains goes in one package that imports
+        none of them (e.g., `spikesorting/v2/_core`).
+        `tests/spikesorting/v2/test_internal_architecture.py` enforces this.
+    - Code shared across pipelines belongs in `spyglass/utils`.
 - For analysis that will be only useful to you, create your own schema.
 
 ## Misc

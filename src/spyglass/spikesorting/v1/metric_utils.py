@@ -1,6 +1,11 @@
+from __future__ import annotations
+
 import numpy as np
 import spikeinterface as si
-import spikeinterface.qualitymetrics as sq
+
+from spyglass.spikesorting import _si_compat
+
+sq = _si_compat.quality_metrics_module()
 
 
 def compute_isi_violation_fractions(

@@ -278,13 +278,13 @@
 #
 # #### Spike Sorting
 #
-# The spike sorting pipeline relies on `spikeinterface` and optionally
-# `mountainsort4`.
+# Spike sorting, MUA and decoding need the `spikesorting` extra, which
+# `environments/environment.yml` installs. The `spikesorting-v2` extra adds the
+# MountainSort4 and MountainSort5 sorters.
 #
 # ```bash
 # conda activate <your-spyglass-env>
-# pip install spikeinterface[full,widgets]
-# pip install mountainsort4
+# pip install "spyglass-neuro[spikesorting-v2]"
 # ```
 #
 # #### Decoding

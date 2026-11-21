@@ -69,12 +69,12 @@ class DataDownloader:
         self.file_paths = file_paths if download_dlc else file_paths[:NON_DLC]
         self.base_dir.mkdir(exist_ok=True)
 
-        # Start downloads
-        _ = self.file_downloads
-
     @cached_property  # Only make list of processes once
     def file_downloads(self) -> Dict[str, Union[Popen, None]]:
-        """{File: POpen/None} for each file. If exists/finished, None."""
+        """{File: POpen/None} for each file. If exists/finished, None.
+
+        The first access starts the downloads.
+        """
         ret = dict()
         for path in self.file_paths:
             target_dir = self.base_dir / path["relative_dir"]

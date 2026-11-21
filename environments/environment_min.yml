@@ -16,7 +16,8 @@ dependencies:
   # Core Python scientific stack
   - python>=3.10,<3.13
   - pip
-  - numpy
+  - numpy>=2,<3
+  - scipy>=1.13
   - matplotlib
   - bottleneck
   - seaborn

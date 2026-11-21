@@ -6,7 +6,7 @@ import numpy as np
 import scipy.stats as stats
 import spikeinterface as si
 
-from spyglass.common.common_ephys import Electrode
+from spyglass.spikesorting import _si_compat
 from spyglass.utils import logger
 
 
@@ -39,6 +39,9 @@ def get_group_by_shank(
     omit_unitrode : bool
         Optional. If True, no sort groups are defined for unitrodes.
     """
+    # Imported here so importing this module declares no schema.
+    from spyglass.common.common_ephys import Electrode
+
     # get the electrodes from this NWB file
     electrodes = (
         Electrode()
@@ -150,7 +153,7 @@ def _init_artifact_worker(
     proportion_above_thresh=1.0,
 ):
     recording = (
-        si.load_extractor(recording)
+        _si_compat.load_extractor(recording)
         if isinstance(recording, dict)
         else recording
     )
@@ -263,6 +266,19 @@ def _check_artifact_thresholds(
 
 
 def _get_recording_timestamps(recording):
+    """Return the timestamps of every segment of ``recording``, concatenated.
+
+    ``recording.get_times()`` returns only one segment's times.
+
+    Parameters
+    ----------
+    recording : si.BaseRecording
+
+    Returns
+    -------
+    np.ndarray
+        ``(total_frames,)`` timestamps in seconds.
+    """
     num_segments = recording.get_num_segments()
 
     if num_segments <= 1:
@@ -282,6 +298,49 @@ def _get_recording_timestamps(recording):
         timestamps[start_index:end_index] = recording.get_times(segment_index=i)
 
     return timestamps
+
+
+def read_raw_nwb_recording(
+    nwb_file_abs_path, load_time_vector=False, electrical_series_path=None
+):
+    """Read the raw acquisition ElectricalSeries as a SpikeInterface recording.
+
+    The series is named explicitly because SI >= 0.100 raises on files with
+    several ElectricalSeries (e.g. LFP) and SI 0.99 picks the first. The
+    keyword is ``electrical_series_name`` in SI 0.99 and
+    ``electrical_series_path`` in SI >= 0.100.
+
+    Parameters
+    ----------
+    nwb_file_abs_path : str
+        Absolute path to the NWB file to read.
+    load_time_vector : bool, optional
+        Passed through to ``read_nwb_recording``. Defaults to False.
+    electrical_series_path : str, optional
+        In-file path of the raw acquisition ElectricalSeries. When omitted,
+        this helper resolves it with ``get_raw_eseries_path``.
+
+    Returns
+    -------
+    si.BaseRecording
+        The raw acquisition recording.
+    """
+    import inspect
+
+    import spikeinterface.extractors as se
+
+    from spyglass.utils.nwb_helper_fn import get_raw_eseries_path
+
+    series_path = electrical_series_path or get_raw_eseries_path(
+        nwb_file_abs_path
+    )
+    params = inspect.signature(se.read_nwb_recording).parameters
+    kwargs = {"load_time_vector": load_time_vector}
+    if "electrical_series_path" in params:  # SpikeInterface >= 0.100
+        kwargs["electrical_series_path"] = series_path
+    else:  # SpikeInterface 0.99.x
+        kwargs["electrical_series_name"] = series_path.rsplit("/", 1)[-1]
+    return se.read_nwb_recording(nwb_file_abs_path, **kwargs)
 
 
 def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
