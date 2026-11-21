@@ -122,10 +122,87 @@ python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 
 ### Manual Installation
 
+`pip install spyglass-neuro` covers session ingestion, LFP, position,
+linearization and ripple detection. Spike sorting, MUA and decoding need the
+`spikesorting` extra, which `environments/environment.yml` installs:
+
+```bash
+pip install "spyglass-neuro[spikesorting]"
+```
+
 For manual installation and advanced configuration:
 
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 - [Database Setup Guide](docs/src/GettingStarted/DATABASE.md)
+
+## Quick example
+
+The v2 spike sorting pipeline (SpikeInterface 0.104) is recommended for new
+sorts. One call preprocesses the recording, detects artifacts, runs the sorter,
+writes the initial curation, and registers the result on the spike-sorting merge
+table.
+
+Install the `spikesorting-v2` extra
+(`pip install "spyglass-neuro[spikesorting-v2]"`), which provides the default
+native MountainSort4 sorter and the MountainSort5 alternative. Configure the
+database connection and ingest your session first. Review bad channels and
+reference metadata before grouping, as shown in the
+[v2 first-sort notebook](https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV2/).
+
+```python
+from spyglass.common.common_lab import LabTeam
+from spyglass.spikesorting.v2 import initialize_v2_defaults
+from spyglass.spikesorting.v2.pipeline import (
+    describe_sort_groups,
+    run_v2_pipeline,
+    select_units_for_analysis,
+)
+from spyglass.spikesorting.v2.recording import SortGroupV2
+
+nwb_file_name = "your_session.nwb"  # already ingested via insert_sessions
+
+initialize_v2_defaults()  # install the default parameter rows
+LabTeam.insert1(
+    {"team_name": "my_team", "team_description": "..."}, skip_duplicates=True
+)
+# set_group_by_shank refuses to overwrite existing sort groups.
+if not (SortGroupV2 & {"nwb_file_name": nwb_file_name}):
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+sort_groups = describe_sort_groups(nwb_file_name)
+print(sort_groups)
+sort_group_id = None  # replace with a reviewed ID from the table above
+if sort_group_id not in list(sort_groups["sort_group_id"]):
+    raise ValueError("Choose a sort_group_id from the displayed table before sorting.")
+
+# Choose a preset that matches the group's region and sampling rate.
+analysis_summary = run_v2_pipeline(
+    nwb_file_name=nwb_file_name,
+    sort_group_id=sort_group_id,
+    interval_list_name="raw data valid times",
+    team_name="my_team",
+    pipeline_preset="franklab_probe_hippocampus_30khz_ms4_2026_06",
+    auto_curate=True,
+)
+# Selects unreviewed units that pass the auto-curation rules. For human
+# review, follow the curation notebook and select review.result() instead.
+receipt = select_units_for_analysis(
+    analysis_summary.auto_labeled_curation, policy="v2_unflagged_units"
+)
+spike_times, unit_ids = receipt.fetch_spike_data(return_unit_ids=True)
+print(receipt.summary())  # selected/excluded counts and reasons if empty
+```
+
+Without `auto_curate=True`, a run stops at the uncurated root and
+`auto_labeled_merge_id` is `None`. A `root_merge_id` identifies every root unit;
+choose a curated generation and an explicit selection policy before decoding.
+
+See the
+[Spike Sorting v2 notebooks](https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV2/)
+for presets, curation, concatenation, and cross-session unit matching, and the
+[v1→v2 migration guide](https://lorenfranklab.github.io/spyglass/latest/Features/SpikeSortingV2_Migration/)
+for porting existing v1 workflows. Existing v0/v1 sorts stay readable in the
+main environment; new sorts use v2.
 
 ## Tutorials
 

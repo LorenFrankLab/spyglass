@@ -279,3 +279,19 @@ def test_plot_metrics_figure_respects_explicit_columns():
     titles = [ax.get_title() for ax in fig.axes if ax.get_title()]
     assert titles == ["snr"]
     plt.close(fig)
+
+
+@pytest.mark.unit
+def test_notebook_uses_visualization_facade():
+    """The user notebook teaches the discoverable ``ssviz`` facade."""
+    assert _NOTEBOOK.exists(), f"notebook {_NOTEBOOK} is missing"
+    notebook = json.loads(_NOTEBOOK.read_text())
+    sources = [
+        "".join(cell.get("source", []))
+        for cell in notebook["cells"]
+        if cell.get("cell_type") == "code"
+    ]
+    code = "\n".join(sources)
+    assert "from spyglass.spikesorting.v2 import visualization as ssviz" in code
+    assert "ssviz.available_visualizations()" in code
+    assert "ssviz.plot_" in code

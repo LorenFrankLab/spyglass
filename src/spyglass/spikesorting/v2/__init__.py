@@ -2,9 +2,9 @@
 
 Submodules load lazily, so ``import spyglass.spikesorting.v2`` does not import
 SpikeInterface or the table modules. Tables (``from spyglass.spikesorting.v2 import
-Recording``) load on first use. Eager names: ``initialize_v2_defaults``
-installs the default Lookup rows in one call, and ``CurationLabel`` is the
-canonical curation label set.
+Recording``) and the pipeline functions load on first use, including
+``initialize_v2_defaults``, which installs every default Lookup row in one call.
+``CurationLabel``, the canonical curation label set, is the one eager name.
 """
 
 from importlib import import_module
@@ -14,52 +14,6 @@ from spyglass.utils.parallel import install_openblas_fork_repair
 
 # SpikeInterface's forked workers otherwise deadlock SciPy's OpenBLAS.
 install_openblas_fork_repair()
-
-
-def initialize_v2_defaults() -> None:
-    """Install the default Lookup rows for the v2 spike-sorting stages.
-
-    Calls ``insert_default()`` on ``PreprocessingParameters``,
-    ``ArtifactDetectionParameters``, ``SorterParameters``,
-    ``AnalyzerWaveformParameters``, ``QualityMetricParameters``,
-    ``AutoCurationRules``, ``CurationReviewProfile``, ``MatcherParameters``,
-    and ``MotionCorrectionParameters`` (with the estimation and interpolation
-    recipes it names), then adds the v2 unit-selection policies. Idempotent.
-
-    Examples
-    --------
-    >>> from spyglass.spikesorting.v2 import initialize_v2_defaults
-    >>> initialize_v2_defaults()
-    """
-    from spyglass.spikesorting.v2.artifact import ArtifactDetectionParameters
-    from spyglass.spikesorting.v2.metric_curation import (
-        AutoCurationRules,
-        QualityMetricParameters,
-    )
-    from spyglass.spikesorting.v2.motion import MotionCorrectionParameters
-    from spyglass.spikesorting.v2.recording import PreprocessingParameters
-    from spyglass.spikesorting.v2.review_profile import CurationReviewProfile
-    from spyglass.spikesorting.v2.sorting import (
-        AnalyzerWaveformParameters,
-        SorterParameters,
-    )
-    from spyglass.spikesorting.v2.unit_matching import MatcherParameters
-
-    PreprocessingParameters.insert_default()
-    ArtifactDetectionParameters.insert_default()
-    SorterParameters.insert_default()
-    AnalyzerWaveformParameters.insert_default()
-    QualityMetricParameters.insert_default()
-    AutoCurationRules.insert_default()
-    MatcherParameters.insert_default()
-    CurationReviewProfile.insert_default()
-    MotionCorrectionParameters.insert_default()
-    # Additive rows in the shared UnitSelectionParams table.
-    from spyglass.spikesorting.v2.analysis_selection import (
-        ensure_v2_unit_selection_policies,
-    )
-
-    ensure_v2_unit_selection_policies()
 
 
 #: Tables, imported from their module on first access.
@@ -87,6 +41,7 @@ _TABLE_MODULES = {
     "MotionEstimate": "motion",
     "MotionCorrectedRecordingSelection": "motion",
     "MotionCorrectedRecording": "motion",
+    "PipelinePreset": "pipeline_preset",
     "RecordingRecomputeVersions": "recompute",
     "RecordingRecomputeSelection": "recompute",
     "RecordingRecompute": "recompute",
@@ -112,35 +67,47 @@ _TABLE_MODULES = {
     "TrackedUnit": "unit_matching",
 }
 
-#: Pipeline names, imported from their module on first access.
-_PIPELINE_MODULES = {
-    "preflight_v2_unit_match": "_matching.preflight",
-    "open_curation_analyzer": "_curation.analyzer",
-    "V2_UNIT_SELECTION_POLICIES": "analysis_selection",
-    "resolve_unit_selection": "analysis_selection",
-    "select_units_for_analysis": "analysis_selection",
-    "CurationRef": "curation_api",
-    "EvaluationResult": "curation_api",
-    "RunResult": "curation_api",
-    "FigPackReview": "review_api",
-    "ReviewProfileRef": "review_api",
-    "describe_review_profiles": "review_api",
-}
-
+# Names after ``CurationLabel`` resolve lazily from ``.pipeline``.
 __all__ = [
-    "initialize_v2_defaults",
     "CurationLabel",
+    "initialize_v2_defaults",
+    "verify_v2_default_catalog",
+    "run_v2_pipeline",
+    "run_v2_concat_pipeline",
+    "run_v2_pipeline_session",
+    "estimate_motion",
+    "estimate_concat_motion",
+    "run_v2_unit_match",
+    "plan_v2_unit_match",
+    "plan_v2_unit_match_from_sorts",
+    "plan_v2_unit_match_from_curations",
     "preflight_v2_unit_match",
-    "open_curation_analyzer",
-    "V2_UNIT_SELECTION_POLICIES",
-    "resolve_unit_selection",
-    "select_units_for_analysis",
+    "preflight_v2_pipeline",
+    "preflight_v2_concat_pipeline",
+    "preflight_v2_pipeline_session",
+    "describe_run",
+    "describe_units",
+    "describe_parameter_rows",
+    "describe_sort_groups",
+    "describe_epochs",
+    "describe_pipeline_presets",
+    "describe_pipeline_preset",
+    "describe_recommendation_status",
+    "list_pipeline_presets",
+    "register_pipeline_preset",
+    "clone_pipeline_preset",
+    "describe_unit_match_choices",
+    "plot_sort_group_geometry",
+    "RunResult",
     "CurationRef",
     "EvaluationResult",
-    "RunResult",
-    "FigPackReview",
     "ReviewProfileRef",
     "describe_review_profiles",
+    "FigPackReview",
+    "open_curation_analyzer",
+    "select_units_for_analysis",
+    "resolve_unit_selection",
+    "V2_UNIT_SELECTION_POLICIES",
 ]
 
 
@@ -155,9 +122,9 @@ def __getattr__(name):
         value = getattr(module, name)
         globals()[name] = value
         return value
-    if name in _PIPELINE_MODULES:
-        module = import_module(f"{__name__}.{_PIPELINE_MODULES[name]}")
-        value = getattr(module, name)
+    if name in __all__:
+        pipeline = import_module(f"{__name__}.pipeline")
+        value = getattr(pipeline, name)
         globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
