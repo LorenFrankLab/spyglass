@@ -85,7 +85,8 @@ def review_page(
                     "button", name="Save draft", exact=True
                 ).wait_for()
                 page.get_by_text("Draft saved.", exact=False).wait_for()
-            page.get_by_role("row").first.wait_for()
+            # Row 0 is the header; on a loaded machine the unit rows render later.
+            page.get_by_role("row").nth(1).wait_for()
             yield page
             assert not errors, f"Browser errors: {errors}"
         except Exception:
@@ -148,13 +149,17 @@ def start_curating(page) -> None:
 def select_units(page, *unit_ids: int) -> None:
     """Select exactly ``unit_ids`` through the unit table's row checkboxes."""
     rows = page.get_by_role("row")
+    listed_units = set()
     for index in range(1, rows.count()):  # row 0 is the header
         row = rows.nth(index)
         unit_id = int(row_texts(row)[1].split(" ")[0])
+        listed_units.add(unit_id)
         box = row.get_by_role("checkbox")
         wanted = unit_id in unit_ids
         if box.is_checked() != wanted:
             box.set_checked(wanted)
+    missing = set(unit_ids) - listed_units
+    assert not missing, f"units {sorted(missing)} are not in the unit table"
     listed = ", ".join(str(u) for u in unit_ids)
     page.get_by_text(re.compile(rf"^Units: {listed}$")).wait_for()
 
