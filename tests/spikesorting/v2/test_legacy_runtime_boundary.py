@@ -162,6 +162,24 @@ def test_default_merge_sources_skip_v2_when_unavailable(dj_conn, monkeypatch):
     assert m._available_merge_sources() == ["v0", "v1", "v2"]
 
 
+def test_v2_artifact_restriction_warns_when_unresolved(dj_conn, monkeypatch):
+    """``restrict_by_artifact=True`` with a non-artifact interval name and
+    no ``artifact_detection_id`` warns that v2 results are NOT artifact-restricted,
+    instead of silently returning unrestricted merge ids.
+    """
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    captured = []
+    monkeypatch.setattr(
+        m.logger, "warning", lambda msg, *a, **k: captured.append(msg)
+    )
+    m.SpikeSortingOutput()._get_restricted_merge_ids_v2(
+        {"interval_list_name": "raw data valid times"},
+        restrict_by_artifact=True,
+    )
+    assert any("artifact-restricted" in msg for msg in captured), captured
+
+
 # ---------- one sorting pipeline per decoding group ---------------------------
 # v0/v1 rows cannot be populated under SI 0.104, so these tests stub only the
 # master-table source lookup and run the real checks.
@@ -229,6 +247,37 @@ def test_decoding_group_allows_one_pipeline_or_imported(dj_conn, monkeypatch):
             monkeypatch, {str(uuid.uuid4()): source for source in pair}
         )
         m.SpikeSortingOutput.assert_decoding_merge_ids_ok(merge_ids)
+
+
+def test_default_sources_warn_when_v2_and_v0_v1_both_match(
+    dj_conn, monkeypatch
+):
+    """Default sources route a v1-style key to v2 too; returning both
+    families warns, an explicit source list or a one-family result does not."""
+    from spyglass.spikesorting import spikesorting_merge as m
+
+    v1_ids, v2_ids = [uuid.uuid4()], [uuid.uuid4()]
+    monkeypatch.setattr(
+        m.SpikeSortingOutput,
+        "_get_restricted_merge_ids_v1",
+        lambda self, key, **kwargs: list(v1_ids),
+    )
+    monkeypatch.setattr(
+        m.SpikeSortingOutput,
+        "_get_restricted_merge_ids_v2",
+        lambda self, key, **kwargs: list(v2_ids),
+    )
+    key = {"nwb_file_name": "absent_v1_v2_mix_.nwb", "curation_id": 1}
+
+    def mix_warnings(**kwargs):
+        captured = _capture_warnings(monkeypatch)
+        m.SpikeSortingOutput().get_restricted_merge_ids(dict(key), **kwargs)
+        return [msg for msg in captured if "both pipelines" in msg]
+
+    assert len(mix_warnings()) == 1
+    assert mix_warnings(sources=["v0", "v1", "v2"]) == []
+    v2_ids.clear()
+    assert mix_warnings() == []
 
 
 def test_spike_accessor_counts_v2_sources_as_one_pipeline(dj_conn, monkeypatch):

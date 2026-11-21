@@ -98,6 +98,39 @@ def test_set_group_by_shank_refuses_overlapping_rerun(polymer_smoke_session):
         SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
 
 
+@pytest.mark.slow
+def test_set_group_by_shank_overwrite_requires_confirm(polymer_smoke_session):
+    """``delete_existing_entries=True, confirm=False`` returns a preview
+    and raises; ``confirm=True`` performs the cautious delete + reinsert."""
+    from spyglass.spikesorting.v2.recording import (
+        DeletionPreview,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+
+    preview = SortGroupV2.preview_existing_entries(nwb_file_name)
+    assert isinstance(preview, DeletionPreview)
+    assert preview.sort_group_rows == 4
+    assert preview.electrode_rows == 128
+
+    with pytest.raises(ValueError, match="requires confirm=True"):
+        SortGroupV2.set_group_by_shank(
+            nwb_file_name=nwb_file_name,
+            delete_existing_entries=True,
+        )
+
+    # Confirmed overwrite succeeds and produces a fresh set.
+    SortGroupV2.set_group_by_shank(
+        nwb_file_name=nwb_file_name,
+        delete_existing_entries=True,
+        confirm=True,
+    )
+    assert len(SortGroupV2 & polymer_smoke_session) == 4
+
+
 # ---------- SortGroupV2 by electrode-table column --------------------------
 
 
@@ -405,6 +438,26 @@ def test_sort_group_insert_validates_tuple_and_dataframe_rows():
     )
     with pytest.raises(ValueError, match="ReferenceMode"):
         SortGroupV2().insert(frame)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_part_inserts_reach_their_checks_with_tuple_rows():
+    """Tuple rows reach the part tables' own checks instead of failing first."""
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.curation import CurationV2
+    from spyglass.spikesorting.v2.recording import SortGroupV2
+
+    # No master row, so the foreign key is what refuses the member.
+    with pytest.raises(dj.errors.IntegrityError):
+        SortGroupV2.SortGroupElectrode().insert1(
+            ("a27_irrelevant_.nwb", 0, "0", 0)
+        )
+    part = CurationV2.ParentMergeGroup()
+    row = dict.fromkeys(part.heading.names, 0)
+    row["sorting_id"] = "00000000-0000-0000-0000-000000000000"
+    with pytest.raises(ValueError, match="no CurationV2 row"):
+        part.insert1(tuple(row[name] for name in part.heading.names))
 
 
 @pytest.mark.usefixtures("dj_conn")
@@ -936,3 +989,68 @@ def test_set_group_by_electrode_table_column_empty_match_raises(
             electrode_column="electrode_id",
             value_groups=[[10_000_000]],  # no electrode has this id
         )
+
+
+@pytest.mark.slow
+def test_sortgroup_overwrite_preview_lists_cross_team_downstream(
+    polymer_smoke_session,
+):
+    """The overwrite preview lists downstream rows owned by each team whose
+    sort groups it would cascade into (it does not block).
+    """
+    from spyglass.common.common_lab import LabTeam
+    from spyglass.spikesorting.v2 import initialize_v2_defaults
+    from spyglass.spikesorting.v2.recording import (
+        RecordingSelection,
+        SortGroupV2,
+    )
+
+    nwb_file_name = polymer_smoke_session["nwb_file_name"]
+    _clean_session_v2(polymer_smoke_session)
+    initialize_v2_defaults()
+    SortGroupV2.set_group_by_shank(nwb_file_name=nwb_file_name)
+    sort_group_ids = sorted(
+        int(s)
+        for s in (SortGroupV2 & polymer_smoke_session).fetch("sort_group_id")
+    )
+    assert len(sort_group_ids) >= 2, "need >=2 sort groups for a two-team test"
+
+    for team in ("team_alpha", "team_beta"):
+        LabTeam.insert1(
+            {"team_name": team, "team_description": "cross-team preview test"},
+            skip_duplicates=True,
+        )
+
+    try:
+        # Two teams own DIFFERENT sort groups of the SAME session.
+        RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_ids[0],
+                "interval_list_name": "raw data valid times",
+                "preprocessing_params_name": "default",
+                "team_name": "team_alpha",
+            }
+        )
+        RecordingSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "sort_group_id": sort_group_ids[1],
+                "interval_list_name": "raw data valid times",
+                "preprocessing_params_name": "default",
+                "team_name": "team_beta",
+            }
+        )
+
+        preview = SortGroupV2.preview_existing_entries(nwb_file_name)
+        by_team = {
+            row["team_name"]: row for row in preview.cross_team_downstream
+        }
+        assert {"team_alpha", "team_beta"} <= set(by_team), (
+            "overwrite preview must enumerate both teams' downstream rows; "
+            f"got {preview.cross_team_downstream}"
+        )
+        assert by_team["team_alpha"]["recording_selection_rows"] >= 1
+        assert by_team["team_beta"]["recording_selection_rows"] >= 1
+    finally:
+        _clean_session_v2(polymer_smoke_session)

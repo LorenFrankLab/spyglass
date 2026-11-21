@@ -262,6 +262,157 @@ def test_detect_artifacts_empty_sliver_filter_returns_empty():
 
 
 @pytest.mark.usefixtures("dj_conn")
+def test_artifact_detection_delete_tolerates_already_gone_interval_list():
+    """``RecordingArtifactDetection.delete`` does not raise when the paired
+    IntervalList rows were already removed.
+
+    Uses a dedicated planted selection so the shared fixture is untouched.
+    """
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+
+    nwb = "a25_delete_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    params_name = "v2_a25_delete_params"
+    ilist_name = artifact_detection_interval_list_name(aid)
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingArtifactSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": params_name,
+                "recording_id": rec_id,
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+        # The IntervalList row the delete would resolve and try to clean.
+        IntervalList.insert1(
+            {
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+                "valid_times": np.empty((0, 2)),
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.RemovedInterval.insert1(
+            {
+                "artifact_detection_id": aid,
+                "nwb_file_name": nwb,
+                "interval_list_name": ilist_name,
+            }
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        # Delete the IntervalList row out of band, keeping the ownership part.
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                IntervalList
+                & {
+                    "nwb_file_name": nwb,
+                    "interval_list_name": ilist_name,
+                }
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+        # Must not raise.
+        (RecordingArtifactDetection & {"artifact_detection_id": aid}).delete(
+            safemode=False
+        )
+        assert (
+            len(RecordingArtifactDetection & {"artifact_detection_id": aid})
+            == 0
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                RecordingArtifactSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+@pytest.mark.usefixtures("dj_conn")
+def test_artifact_detection_delete_refuses_master_without_part_rows():
+    """Deleting a ``RecordingArtifactDetection`` master with no
+    ``RemovedInterval`` part row raises rather than guessing interval
+    ownership, and leaves the master in place."""
+    import uuid
+
+    import datajoint as dj
+
+    from spyglass.spikesorting.v2.artifact import (
+        RecordingArtifactDetection,
+        RecordingArtifactSelection,
+    )
+
+    nwb = "ownership_nopart_session_.nwb"
+    rec_id = _plant_fake_recording(uuid.uuid4(), nwb, 30000.0)
+    aid = uuid.uuid4()
+    conn = dj.conn()
+    conn.query("SET FOREIGN_KEY_CHECKS=0")
+    try:
+        RecordingArtifactSelection.insert1(
+            {
+                "artifact_detection_id": aid,
+                "artifact_detection_params_name": "v2_ownership_nopart_params",
+                "recording_id": rec_id,
+            },
+            allow_direct_insert=True,
+        )
+        RecordingArtifactDetection.insert1(
+            {"artifact_detection_id": aid}, allow_direct_insert=True
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=1")
+
+    try:
+        with pytest.raises(ValueError, match="Refusing to guess"):
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete(safemode=False)
+        assert (
+            len(RecordingArtifactDetection & {"artifact_detection_id": aid})
+            == 1
+        )
+    finally:
+        conn.query("SET FOREIGN_KEY_CHECKS=0")
+        try:
+            (
+                RecordingArtifactDetection & {"artifact_detection_id": aid}
+            ).delete_quick()
+            (
+                RecordingArtifactSelection & {"artifact_detection_id": aid}
+            ).delete_quick()
+        finally:
+            conn.query("SET FOREIGN_KEY_CHECKS=1")
+        _drop_fake_recording(rec_id)
+
+
+@pytest.mark.usefixtures("dj_conn")
 def test_shared_group_membership_is_fixed_and_frozen(monkeypatch):
     """A group's members cannot change after creation, and a detection reads
     and masks only the members frozen with its selection.
@@ -412,6 +563,148 @@ def _orphan_masters():
             - ArtifactDetectionOutput.SharedArtifactDetection
         ),
     }
+
+
+@pytest.mark.slow
+@pytest.mark.integration
+def test_deleting_member_recording_removes_its_shared_detections(
+    chronic_2_session_minirec, monkeypatch
+):
+    """Deleting a member ``Recording`` removes every group holding it, with
+    each group's selection, populated detection, merge registration, interval
+    ownership rows and the sorts that use it; groups without it stay whole.
+
+    ``g12`` and ``g2`` share member ``r2``; ``g1`` holds only ``r1``.
+    """
+    from spyglass.common import IntervalList
+    from spyglass.spikesorting.v2._artifacts.naming import (
+        artifact_detection_interval_list_name,
+    )
+    from spyglass.spikesorting.v2._core.recipe_catalog import (
+        CORTEX_PREPROC,
+        HIPPOCAMPUS_PREPROC,
+    )
+    from spyglass.spikesorting.v2 import artifact as artifact_module
+    from spyglass.spikesorting.v2.artifact import (
+        ArtifactDetectionParameters,
+        SharedArtifactDetection,
+        SharedArtifactGroup,
+        SharedArtifactSelection,
+    )
+    from spyglass.spikesorting.v2.artifact_output import (
+        ArtifactDetectionOutput,
+    )
+    from spyglass.spikesorting.v2.recording import Recording, RecordingSelection
+    from spyglass.spikesorting.v2.sorting import SortingSelection
+
+    member = chronic_2_session_minirec["same_day_members"][0]
+    nwb_file_name = member["nwb_file_name"]
+    window = "v2_shared_cascade_window"
+    raw = (
+        IntervalList
+        & {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": "raw data valid times",
+        }
+    ).fetch1("valid_times")
+    IntervalList.insert1(
+        {
+            "nwb_file_name": nwb_file_name,
+            "interval_list_name": window,
+            "valid_times": np.asarray([[raw[0][0] + 0.5, raw[0][0] + 4.0]]),
+            "pipeline": "shared_group_cascade_test",
+        },
+        skip_duplicates=True,
+    )
+    ArtifactDetectionParameters.insert_default()
+    baseline = _orphan_masters()
+    # Both members are the one tetrode under two recipes, so their contacts
+    # coincide; the union scan is not what this test checks.
+    monkeypatch.setattr(
+        artifact_module.si,
+        "aggregate_channels",
+        lambda recordings: recordings[0],
+    )
+    r1, r2 = (
+        RecordingSelection.insert_selection(
+            {
+                **member,
+                "interval_list_name": window,
+                "preprocessing_params_name": recipe,
+                "team_name": chronic_2_session_minirec["owner"],
+            }
+        )
+        for recipe in (HIPPOCAMPUS_PREPROC, CORTEX_PREPROC)
+    )
+    Recording.populate([r1, r2], reserve_jobs=False)
+
+    groups = {"g12": [r1, r2], "g2": [r2], "g1": [r1]}
+    detections, sorts = {}, {}
+    for name, members in groups.items():
+        SharedArtifactGroup.create_group(nwb_file_name, name, members)
+        detections[name] = SharedArtifactSelection.insert_selection(
+            {
+                "nwb_file_name": nwb_file_name,
+                "shared_artifact_group_name": name,
+                "artifact_detection_params_name": "none",
+            }
+        )
+        SharedArtifactDetection.populate(detections[name], reserve_jobs=False)
+        sorts[name] = SortingSelection.insert_selection(
+            {
+                "recording_id": members[-1]["recording_id"],
+                "sorter": "mountainsort5",
+                "sorter_params_name": "franklab_30khz_ms5_2026_06",
+                **detections[name],
+            }
+        )
+    assert _orphan_masters() == baseline
+
+    def _present(name):
+        detection = detections[name]
+        rows = {
+            "group": SharedArtifactGroup
+            & {
+                "nwb_file_name": nwb_file_name,
+                "shared_artifact_group_name": name,
+            },
+            "selection": SharedArtifactSelection & detection,
+            "frozen members": SharedArtifactSelection.Member & detection,
+            "detection": SharedArtifactDetection & detection,
+            "interval owner": SharedArtifactDetection.RemovedInterval
+            & detection,
+            "merge": ArtifactDetectionOutput.SharedArtifactDetection
+            & detection,
+            "sort": SortingSelection & sorts[name],
+        }
+        return {label: bool(rows[label]) for label in rows}
+
+    try:
+        (Recording & r2).delete(safemode=False)
+        for name in ("g12", "g2"):
+            assert not any(_present(name).values()), (name, _present(name))
+        assert all(_present("g1").values()), _present("g1")
+        assert _orphan_masters() == baseline
+
+        (Recording & r1).delete(safemode=False)
+        assert not any(_present("g1").values()), _present("g1")
+        assert _orphan_masters() == baseline
+    finally:
+        (RecordingSelection & [r1, r2]).delete(safemode=False)
+        # An upstream cascade leaves a detection's IntervalList row behind.
+        (
+            IntervalList
+            & {"nwb_file_name": nwb_file_name}
+            & [
+                {
+                    "interval_list_name": artifact_detection_interval_list_name(
+                        pk["artifact_detection_id"]
+                    )
+                }
+                for pk in detections.values()
+            ]
+            + [{"interval_list_name": window}]
+        ).delete_quick()
 
 
 @pytest.mark.usefixtures("dj_conn")
