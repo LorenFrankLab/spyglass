@@ -1397,10 +1397,6 @@ A preset names one parameter row per stage: preprocessing, artifact detection
 - Lookup is `_find_pipeline_preset`: the code dict first, then the table. A
     shipped name therefore resolves without a query, and a saved row cannot
     replace a shipped preset.
-- `register_pipeline_preset(..., validate_rows=False)` adds to the code dict
-    only, for one Python session, without checking rows or saving. It still
-    reads `PipelinePreset`, so a saved preset of the same name with other
-    content is refused.
 - The preset functions raise `PipelineInputError` (a `ValueError`) for an
     invalid name or content. Preflight warns when a custom preset has
     `sampling_rate_hz=None`, because the rate check is skipped.

@@ -2588,7 +2588,9 @@ def test_concat_analyzer_receives_statistics_spans_after_reload(
 
 @pytest.mark.slow
 @pytest.mark.smoke
-def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
+def test_run_v2_pipeline_concat_mode_routes_session_group(
+    same_day_group, monkeypatch
+):
     """run_v2_pipeline concat mode: member recordings -> concat -> sort -> curation.
 
     Member detection is disabled. Only session-aligned member outputs enter
@@ -2602,10 +2604,11 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     )
     from spyglass.spikesorting.v2.curation import CONCAT_MERGE_GATE_MESSAGE
     from spyglass.spikesorting.v2.curation_api import CurationRef
-    from spyglass.spikesorting.v2.pipeline import (
-        register_pipeline_preset,
-        run_v2_concat_pipeline,
+    from spyglass.spikesorting.v2._orchestration.presets import (
+        _PIPELINE_PRESETS,
+        _PipelinePreset,
     )
+    from spyglass.spikesorting.v2.pipeline import run_v2_concat_pipeline
     from tests.spikesorting.v2._smoke_constants import (
         SMOKE_CLUSTERLESS_PARAM_NAME,
     )
@@ -2614,18 +2617,19 @@ def test_run_v2_pipeline_concat_mode_routes_session_group(same_day_group):
     _ensure_clusterless_sorter_params()
     grp = same_day_group
     preset_name = "test_concat_clusterless_smoke"
-    # Smoke clusterless sorter; concat mode needs no motion recipe.
-    register_pipeline_preset(
+    # Smoke clusterless sorter; concat mode needs no motion recipe. A
+    # test-scoped code preset, so no PipelinePreset row outlives the test.
+    monkeypatch.setitem(
+        _PIPELINE_PRESETS,
         preset_name,
-        {
-            "preprocessing_params_name": grp["preprocessing_params_name"],
-            "artifact_detection_params_name": None,
-            "sorter": "clusterless_thresholder",
-            "sorter_params_name": SMOKE_CLUSTERLESS_PARAM_NAME,
-            "metric_params_name": "minimal",
-            "auto_curation_rules_name": "none",
-        },
-        validate_rows=False,
+        _PipelinePreset(
+            preprocessing_params_name=grp["preprocessing_params_name"],
+            artifact_detection_params_name=None,
+            sorter="clusterless_thresholder",
+            sorter_params_name=SMOKE_CLUSTERLESS_PARAM_NAME,
+            metric_params_name="minimal",
+            auto_curation_rules_name="none",
+        ),
     )
     try:
         summary = run_v2_concat_pipeline(

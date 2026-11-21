@@ -611,9 +611,7 @@ def _assert_preset_rows_exist(name: str, preset: "_PipelinePreset") -> None:
     waveform_params_for_preprocessing(preset.preprocessing_params_name)
 
 
-def register_pipeline_preset(
-    name: str, preset, *, validate_rows: bool = True
-) -> str:
+def register_pipeline_preset(name: str, preset) -> str:
     """Save a custom pipeline preset in ``PipelinePreset``; return its name.
 
     Use the dated ``{lab}_..._{date}`` naming of the built-ins. The preset is
@@ -628,11 +626,6 @@ def register_pipeline_preset(
         with identical content.
     preset : dict or _PipelinePreset
         The preset bundle.
-    validate_rows : bool, optional
-        If True (default), check the referenced rows and save the preset.
-        Pass False to register it for this Python session only, without
-        checking rows or saving; ``PipelinePreset`` is still read so a saved
-        preset of the same name with other content is refused.
 
     Returns
     -------
@@ -644,11 +637,11 @@ def register_pipeline_preset(
     PipelineInputError
         A ``ValueError``. If ``name`` is not a non-empty string of at most 200
         characters, is already used with different content, the preset fails
-        Pydantic validation (the message names the field), or (when
-        ``validate_rows``) a referenced parameter row is missing.
+        Pydantic validation (the message names the field), or a referenced
+        parameter row is missing.
     UnmappedPreprocessingWaveformsError
-        A ``ValueError``. When ``validate_rows`` and the preprocessing row
-        maps to no analyzer waveform windows.
+        A ``ValueError``. When the preprocessing row maps to no analyzer
+        waveform windows.
     """
     # list_pipeline_presets sorts keys, so names must be strings.
     if not isinstance(name, str) or not name.strip() or len(name) > 200:
@@ -666,7 +659,7 @@ def register_pipeline_preset(
             f"register_pipeline_preset({name!r}): the preset content is "
             f"invalid: {exc}"
         ) from exc
-    # A session-only preset must not shadow a saved one of the same name.
+    # A shipped or saved name keeps its content.
     existing = _find_pipeline_preset(name)
     if existing is not None:
         if existing.model_dump() == validated.model_dump():
@@ -677,9 +670,6 @@ def register_pipeline_preset(
             "Choose a different name, or delete the saved preset first: "
             f"(PipelinePreset & {{'pipeline_preset': {name!r}}}).delete()."
         )
-    if not validate_rows:
-        _PIPELINE_PRESETS[name] = validated
-        return name
     _assert_preset_rows_exist(name, validated)
     import datajoint as dj
 
@@ -1006,5 +996,5 @@ def clone_pipeline_preset(
                     "before re-cloning."
                 )
 
-    register_pipeline_preset(new_name, derived_preset, validate_rows=True)
+    register_pipeline_preset(new_name, derived_preset)
     return new_name

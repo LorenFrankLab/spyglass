@@ -312,52 +312,29 @@ def _no_saved(name=None) -> dict:
     return {}
 
 
-@pytest.mark.unit
-def test_register_pipeline_preset_adds_to_registry(monkeypatch):
-    """A registered preset appears in the catalog (no DB row check)."""
-    import spyglass.spikesorting.v2._orchestration.presets as presets_mod
+@pytest.mark.database
+@pytest.mark.db_unit
+def test_register_pipeline_preset_adds_to_registry(dj_conn, clone_env):
+    """A registered preset is saved and appears in the catalog."""
+    from spyglass.spikesorting.v2.pipeline_preset import PipelinePreset
 
-    monkeypatch.setattr(
-        presets_mod,
-        "_PIPELINE_PRESETS",
-        dict(presets_mod._PIPELINE_PRESETS),
-    )
-    # No saved presets: the name-clash lookup reads none.
-    monkeypatch.setattr(presets_mod, "_saved_pipeline_presets", _no_saved)
-    register_pipeline_preset(
-        "lab_custom_2026_06", _custom_spec(), validate_rows=False
-    )
+    clone_env.append("lab_custom_2026_06")
+    register_pipeline_preset("lab_custom_2026_06", _custom_spec())
     assert "lab_custom_2026_06" in list_pipeline_presets()
+    assert PipelinePreset & {"pipeline_preset": "lab_custom_2026_06"}
 
 
 @pytest.mark.unit
-def test_register_pipeline_preset_owns_a_validated_copy(monkeypatch):
-    """The registry keeps its own validated model: mutating the caller's
-    model afterwards does not change the registered recipe, and a model whose
-    fields were made invalid before registration is rejected."""
+def test_register_pipeline_preset_rejects_an_invalidated_model(monkeypatch):
+    """A model whose fields were made invalid after construction is refused."""
     import spyglass.spikesorting.v2._orchestration.presets as presets_mod
     from spyglass.spikesorting.v2._orchestration.presets import _PipelinePreset
 
-    monkeypatch.setattr(
-        presets_mod,
-        "_PIPELINE_PRESETS",
-        dict(presets_mod._PIPELINE_PRESETS),
-    )
     monkeypatch.setattr(presets_mod, "_saved_pipeline_presets", _no_saved)
-    supplied = _PipelinePreset(**_custom_spec())
-    original_sorter = supplied.sorter
-    register_pipeline_preset("lab_owned_2026_06", supplied, validate_rows=False)
-    supplied.sorter = "mutated_after_registration"
-    registered = presets_mod._PIPELINE_PRESETS["lab_owned_2026_06"]
-    assert registered is not supplied
-    assert registered.sorter == original_sorter
-
     broken = _PipelinePreset(**_custom_spec())
     broken.sorter = None
     with pytest.raises(ValueError):
-        register_pipeline_preset(
-            "lab_broken_2026_06", broken, validate_rows=False
-        )
+        register_pipeline_preset("lab_broken_2026_06", broken)
     assert "lab_broken_2026_06" not in presets_mod._PIPELINE_PRESETS
 
 
@@ -366,7 +343,7 @@ def test_register_pipeline_preset_rejects_duplicate():
     """Re-registering an existing name with other content raises."""
     existing = next(iter(_PIPELINE_PRESETS))
     with pytest.raises(ValueError, match="different content"):
-        register_pipeline_preset(existing, _custom_spec(), validate_rows=False)
+        register_pipeline_preset(existing, _custom_spec())
 
 
 @pytest.mark.unit
@@ -381,7 +358,7 @@ def test_register_pipeline_preset_rejects_unknown_field(monkeypatch):
     )
     spec = {**_custom_spec(), "bogus_field": 1}
     with pytest.raises(ValueError):
-        register_pipeline_preset("lab_bad_2026_06", spec, validate_rows=False)
+        register_pipeline_preset("lab_bad_2026_06", spec)
 
 
 @pytest.mark.database
@@ -419,9 +396,7 @@ def test_register_pipeline_preset_rejects_bad_name(monkeypatch):
     )
     for bad_name in (1, "", "   ", None):
         with pytest.raises(ValueError, match="non-empty string"):
-            register_pipeline_preset(
-                bad_name, _custom_spec(), validate_rows=False
-            )
+            register_pipeline_preset(bad_name, _custom_spec())
     assert 1 not in list_pipeline_presets()
 
 
@@ -901,7 +876,7 @@ def test_register_pipeline_preset_refuses_a_shipped_name(dj_conn, clone_env):
 def test_register_pipeline_preset_rejects_a_long_name():
     """A name longer than the 200-character column is refused up front."""
     with pytest.raises(ValueError, match="at most 200 characters"):
-        register_pipeline_preset("x" * 201, _custom_spec(), validate_rows=False)
+        register_pipeline_preset("x" * 201, _custom_spec())
 
 
 @pytest.mark.database
@@ -1537,10 +1512,9 @@ def test_describe_pipeline_preset_artifact_none_skips_artifact(
     section.
     """
     name = "lab_no_artifact_2026_06"
+    clone_env.append(name)
     register_pipeline_preset(
-        name,
-        _spec_with(artifact_detection_params_name=None),
-        validate_rows=False,
+        name, _spec_with(artifact_detection_params_name=None)
     )
     detail = describe_pipeline_preset(name)
     assert (detail["stage"] == "artifact_detection").sum() == 0
@@ -1710,9 +1684,9 @@ def test_clone_refuses_an_existing_different_waveform_mapping(
 
 @pytest.mark.database
 @pytest.mark.db_unit
-def test_session_only_preset_cannot_shadow_a_saved_preset(dj_conn, clone_env):
-    """``validate_rows=False`` refuses a name already saved with other
-    content, so this session's runs cannot silently use a different recipe."""
+def test_saved_preset_name_keeps_its_content(dj_conn, clone_env):
+    """A name already saved with other content is refused, so a run cannot
+    silently use a different recipe under it."""
     import spyglass.spikesorting.v2._orchestration.presets as presets_mod
 
     name = "lab_saved_then_shadowed_2026_11"
@@ -1721,16 +1695,11 @@ def test_session_only_preset_cannot_shadow_a_saved_preset(dj_conn, clone_env):
     assert name not in presets_mod._PIPELINE_PRESETS
     with pytest.raises(ValueError, match="already exists with different"):
         register_pipeline_preset(
-            name,
-            _spec_with(notes="a different recipe note"),
-            validate_rows=False,
+            name, _spec_with(notes="a different recipe note")
         )
     assert name not in presets_mod._PIPELINE_PRESETS
     # Identical content stays a no-op.
-    assert (
-        register_pipeline_preset(name, _custom_spec(), validate_rows=False)
-        == name
-    )
+    assert register_pipeline_preset(name, _custom_spec()) == name
 
 
 #: ``SorterParameters`` fingerprint of the shipped 100 uV "default"
@@ -1809,14 +1778,12 @@ def _broken_preset_spec() -> dict:
             "describe_pipeline_preset",
         ),
         (
-            lambda: register_pipeline_preset(
-                "", _custom_spec(), validate_rows=False
-            ),
+            lambda: register_pipeline_preset("", _custom_spec()),
             "register_pipeline_preset",
         ),
         (
             lambda: register_pipeline_preset(
-                "lab_bad_2026_11", _broken_preset_spec(), validate_rows=False
+                "lab_bad_2026_11", _broken_preset_spec()
             ),
             "register_pipeline_preset",
         ),
@@ -1824,7 +1791,6 @@ def _broken_preset_spec() -> dict:
             lambda: register_pipeline_preset(
                 next(iter(_PIPELINE_PRESETS)),
                 {**_custom_spec(), "notes": "other content"},
-                validate_rows=False,
             ),
             "register_pipeline_preset",
         ),
@@ -1873,9 +1839,7 @@ def test_register_pipeline_preset_names_the_invalid_field(monkeypatch):
         presets_mod, "_PIPELINE_PRESETS", dict(presets_mod._PIPELINE_PRESETS)
     )
     with pytest.raises(ValueError) as error:
-        register_pipeline_preset(
-            "lab_bad_2026_11", _broken_preset_spec(), validate_rows=False
-        )
+        register_pipeline_preset("lab_bad_2026_11", _broken_preset_spec())
     assert "'lab_bad_2026_11'" in str(error.value)
     assert "bogus_field" in str(error.value)
 
