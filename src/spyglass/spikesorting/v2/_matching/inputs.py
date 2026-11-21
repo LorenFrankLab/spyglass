@@ -1046,7 +1046,7 @@ def normalize_curation_choices(curation_choices) -> dict[int, tuple]:
     }
 
 
-def _validate_member_curations(members, choices_by_member) -> None:
+def validate_member_curations(members, choices_by_member) -> None:
     """Validate per-member curation coverage and ownership for a group.
 
     Raises ``ValueError`` when the choices do not exactly cover the members,

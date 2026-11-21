@@ -138,7 +138,6 @@ optional-dependencies.spikesorting-v2-matching = [
   # <3.2.8: later releases pin numpy<2. 3.2.7 still needs the numpy-2 shim in
   # _matching.unitmatch_backend.
   "UnitMatchPy>=3.2.6,<3.2.8",
-  "mat73",                     # UnitMatchPy reads MATLAB .mat exports
   "numpy>=2,<3",               # UnitMatchPy <3.2.8 and the v2 SI stack
 ]
 optional-dependencies.spikesorting-v2-curation = [

@@ -20,7 +20,7 @@ from spyglass.spikesorting.v2._matching.planning import (
 )
 from spyglass.spikesorting.v2.exceptions import CurationNotFoundError
 from spyglass.spikesorting.v2._matching.inputs import (
-    _validate_member_curations,
+    validate_member_curations,
     assert_matching_policy_excludes_mua,
     normalize_curation_choices,
 )
@@ -140,7 +140,7 @@ def _validate_group_plan(plan: UnitMatchPlan) -> None:
     if not (SessionGroup & group):
         raise ValueError(f"SessionGroup {group} is missing; rebuild the plan.")
     members = (SessionGroup.Member & group).fetch(as_dict=True)
-    _validate_member_curations(
+    validate_member_curations(
         members, normalize_curation_choices(plan.curation_choices)
     )
 
@@ -302,9 +302,10 @@ def preflight_v2_unit_match(
                 selection = resolve_unit_selection(pin, policy=plan.unit_policy)
             if not isinstance(selection, UnitSelectionSnapshot):
                 raise ValueError(
-                    "Reviewed plans require typed UnitSelectionSnapshot objects. "
-                    "Resolve the population again and rebuild the plan; primitive "
-                    "dictionaries cannot revalidate policy/evidence drift."
+                    "Reviewed plans require typed UnitSelectionSnapshot objects, "
+                    f"got {type(selection).__name__}. Pass "
+                    "resolve_unit_selection(...) results, or leave "
+                    "unit_selections empty for the planner to fill."
                 )
             if plan.unit_selections:
                 if _reviewed_pin(

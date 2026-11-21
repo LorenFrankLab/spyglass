@@ -68,8 +68,9 @@ python -m pip install -e ".[spikesorting-v2,spikesorting-v2-curation]"
     serialization are validated against that version.
 - `spikesorting-v2-curation`: FigPack browser review.
 - `spikesorting-v2-matching`: cross-session matching with
-    [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch) (UnitMatchPy and
-    `mat73`).
+    [UnitMatch](https://github.com/EnnyvanBeest/UnitMatch) (UnitMatchPy).
+    UnitMatchPy installs `mat73`, which reads `.mat` files with h5py; Spyglass
+    never calls it, and no MATLAB install is needed.
 - Configure the DataJoint connection and `SPYGLASS_BASE_DIR`
     ([Setup](../notebooks/00_Setup.ipynb)) and ingest the session
     ([Insert Data](../notebooks/02_Insert_Data.ipynb)) first.

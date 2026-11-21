@@ -39,8 +39,8 @@ from spyglass.spikesorting.v2.matcher_protocol import (
 
 _INSTALL_HINT = (
     "UnitMatchPy is required for cross-session matching. Install it with "
-    '`pip install -e ".[spikesorting-v2-matching]"` (UnitMatchPy>=3.2.6,<3.2.8 '
-    "+ mat73). If the import fails on `_tkinter`, the top-level "
+    '`pip install -e ".[spikesorting-v2-matching]"` (UnitMatchPy>=3.2.6,<3.2.8). '
+    "If the import fails on `_tkinter`, the top-level "
     "`import UnitMatchPy` is loading its Tk GUI; run in a Tk-enabled "
     "environment."
 )

@@ -78,6 +78,9 @@ Moving the pin costs these reviews and runs:
     when `np.arange` gets 1-element `argwhere` arrays, so
     `_matching/unitmatch_backend.py` hands UnitMatch a numpy proxy that coerces
     them. Lift the cap when upstream restores numpy 2 support.
+- `mat73` comes with UnitMatchPy, for its `read_datapaths` `.mat` reader.
+    Spyglass never calls that reader, and `mat73` needs only h5py and numpy,
+    not MATLAB.
 
 ## `spikesorting-v2-curation` extras
 
