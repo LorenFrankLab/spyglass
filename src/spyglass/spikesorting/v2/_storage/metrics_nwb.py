@@ -1,0 +1,264 @@
+"""NWB (de)serialization for analyzer-curation outputs.
+
+``CurationEvaluation`` writes three scratch tables into one AnalysisNwbfile:
+
+- ``quality_metrics``: one row per unit; NaN on disk, ``None`` on read.
+- ``merge_suggestions``: one row per ``(merge_group_index, unit_id)``.
+- ``proposed_labels``: one row per unit; the ragged ``curation_label`` column
+  exists only if some unit is labeled, since HDMF cannot infer the dtype of
+  an all-empty ragged column.
+
+With zero units, ``quality_metrics`` and ``proposed_labels`` are column-less.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+import pynwb
+from hdmf.common import DynamicTable
+
+from spyglass.spikesorting.v2._curation.metrics import sanitize_for_json
+from spyglass.spikesorting.v2._storage.provenance import (
+    concrete_vectordata,
+    read_table_frames,
+)
+from spyglass.spikesorting.v2.exceptions import UnsupportedMetricValueError
+
+QUALITY_METRICS_TABLE = "quality_metrics"
+MERGE_SUGGESTIONS_TABLE = "merge_suggestions"
+PROPOSED_LABELS_TABLE = "proposed_labels"
+
+
+def _scalar_or_nan(value, *, context: str = "") -> float:
+    """Return one numeric scalar, rejecting metric shape or dtype drift.
+
+    Scalar NaN is valid (a metric not computable for a low-spike unit). Array
+    or object cells raise rather than silently becoming NaN.
+    """
+    array = np.asarray(value)
+    if (
+        array.ndim == 0
+        and np.issubdtype(array.dtype, np.number)
+        and not np.issubdtype(array.dtype, np.complexfloating)
+    ):
+        return float(array)
+    location = f" [{context}]" if context else ""
+    raise UnsupportedMetricValueError(
+        "quality-metrics write"
+        f"{location}: expected a scalar numeric metric value; received "
+        f"{value!r} (type={type(value).__name__}, "
+        f"shape={getattr(value, 'shape', None)}, "
+        f"dtype={getattr(value, 'dtype', None)}). Check the "
+        "SpikeInterface metric output and QualityMetricParameters recipe."
+    )
+
+
+def build_quality_metrics_table(metrics_df: pd.DataFrame) -> DynamicTable:
+    """Wide quality + waveform-shape metrics table (one row per unit).
+
+    ``metrics_df`` is indexed by ``unit_id``. A zero-row frame yields a
+    column-less table.
+    """
+    table = DynamicTable(
+        name=QUALITY_METRICS_TABLE,
+        description=(
+            "SpikeInterface quality + waveform-shape (template) metrics, one "
+            "row per unit."
+        ),
+    )
+    if len(metrics_df) == 0:
+        return table
+    table.add_column(name="unit_id", description="SpikeInterface unit id")
+    metric_columns = list(metrics_df.columns)
+    for column in metric_columns:
+        table.add_column(name=column, description=column)
+    for row in metrics_df.itertuples(index=True, name=None):
+        unit_id = row[0]
+        values = row[1:]
+        table.add_row(
+            unit_id=int(unit_id),
+            **{
+                column: _scalar_or_nan(
+                    value,
+                    context=f"unit_id={int(unit_id)}, column={column!r}",
+                )
+                for column, value in zip(metric_columns, values)
+            },
+        )
+    return table
+
+
+def build_merge_suggestions_table(
+    merge_groups: list[list[int]],
+) -> DynamicTable:
+    """Long merge-suggestions table ``(merge_group_index, unit_id)``."""
+    group_index: list[int] = []
+    unit_ids: list[int] = []
+    for index, group in enumerate(merge_groups):
+        for unit_id in group:
+            group_index.append(index)
+            unit_ids.append(int(unit_id))
+    return DynamicTable(
+        name=MERGE_SUGGESTIONS_TABLE,
+        description="Proposed merge groups; one row per (group, unit).",
+        columns=[
+            concrete_vectordata("merge_group_index", group_index, np.int64),
+            concrete_vectordata("unit_id", unit_ids, np.int64),
+        ],
+    )
+
+
+def build_proposed_labels_table(
+    unit_ids: list[int], labels_by_unit: dict[int, list[str]]
+) -> DynamicTable:
+    """Wide proposed-labels table; ragged label column only when ≥1 label.
+
+    HDMF cannot infer the dtype of an all-empty ragged column.
+    """
+    table = DynamicTable(
+        name=PROPOSED_LABELS_TABLE,
+        description="Proposed auto-curation labels, one row per unit.",
+    )
+    if len(unit_ids) == 0:
+        return table
+    ordered_units = [int(u) for u in unit_ids]
+    table.add_column(name="unit_id", description="SpikeInterface unit id")
+    for unit_id in ordered_units:
+        table.add_row(unit_id=unit_id)
+    label_lists = [list(labels_by_unit.get(u, [])) for u in ordered_units]
+    if any(label_lists):
+        table.add_column(
+            name="curation_label",
+            description="proposed curation labels (ragged, per unit)",
+            data=label_lists,
+            index=True,
+        )
+    return table
+
+
+def write_analyzer_curation_tables(
+    abs_path: str,
+    *,
+    metrics_df: pd.DataFrame,
+    merge_groups: list[list[int]],
+    labels_by_unit: dict[int, list[str]],
+    unit_ids: list[int],
+    provenance_tables=None,
+) -> tuple[str, str, str]:
+    """Write the three curation tables into an existing analysis NWB file.
+
+    Returns the object IDs ``(quality_metrics, merge_suggestions,
+    proposed_labels)``. The caller registers the file in ``AnalysisNwbfile``.
+    Optional ``provenance_tables`` are added as scratch in the same write.
+    """
+    qm_table = build_quality_metrics_table(metrics_df)
+    ms_table = build_merge_suggestions_table(merge_groups)
+    pl_table = build_proposed_labels_table(unit_ids, labels_by_unit)
+    with pynwb.NWBHDF5IO(path=abs_path, mode="a", load_namespaces=True) as io:
+        nwbf = io.read()
+        nwbf.add_scratch(qm_table)
+        nwbf.add_scratch(ms_table)
+        nwbf.add_scratch(pl_table)
+        object_ids = (
+            qm_table.object_id,
+            ms_table.object_id,
+            pl_table.object_id,
+        )
+        for prov in provenance_tables or ():
+            nwbf.add_scratch(prov)
+        io.write(nwbf)
+    return object_ids
+
+
+def _quality_metrics_from_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    """Index a quality-metrics frame by unit_id; NaN -> ``None``."""
+    if "unit_id" not in frame.columns:
+        return pd.DataFrame()
+    frame = frame.set_index("unit_id")
+    frame.index = frame.index.astype(int)
+    frame.index.name = "unit_id"
+    return sanitize_for_json(frame)
+
+
+def _merge_suggestions_from_frame(frame: pd.DataFrame) -> list[list[int]]:
+    """Group a long merge-suggestions frame into unit-id lists."""
+    if len(frame) == 0:
+        return []
+    groups: dict[int, list[int]] = {}
+    for row in frame.itertuples(index=False):
+        groups.setdefault(int(row.merge_group_index), []).append(
+            int(row.unit_id)
+        )
+    return [groups[index] for index in sorted(groups)]
+
+
+def _proposed_labels_from_frame(frame: pd.DataFrame) -> dict[int, list[str]]:
+    """Collect ``{unit_id: [label, ...]}`` for labeled units of a frame."""
+    if "curation_label" not in frame.columns or len(frame) == 0:
+        return {}
+    labels: dict[int, list[str]] = {}
+    for row in frame.itertuples(index=False):
+        unit_labels = [str(label) for label in row.curation_label]
+        if unit_labels:
+            labels[int(row.unit_id)] = unit_labels
+    return labels
+
+
+def read_quality_metrics(abs_path: str, object_id: str) -> pd.DataFrame:
+    """Read the quality-metrics table; returns a DataFrame indexed by unit_id.
+
+    Non-finite values become ``None``.
+    """
+    (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
+    return _quality_metrics_from_frame(frame)
+
+
+def read_merge_suggestions(abs_path: str, object_id: str) -> list[list[int]]:
+    """Read the merge-suggestions table back to a list of unit-id groups."""
+    (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
+    return _merge_suggestions_from_frame(frame)
+
+
+def read_proposed_labels(abs_path: str, object_id: str) -> dict[int, list[str]]:
+    """Read proposed labels back to ``{unit_id: [label, ...]}`` (labeled only)."""
+    (frame,) = read_table_frames(abs_path, object_ids=(object_id,))
+    return _proposed_labels_from_frame(frame)
+
+
+def read_analyzer_curation_tables(
+    abs_path: str,
+    *,
+    metrics_object_id: str,
+    merge_suggestions_object_id: str,
+    proposed_labels_object_id: str,
+) -> tuple[pd.DataFrame, list[list[int]], dict[int, list[str]]]:
+    """Read all three curation tables with one open of the analysis NWB.
+
+    Parameters
+    ----------
+    abs_path : str
+        Absolute path of the ``CurationEvaluation`` analysis NWB.
+    metrics_object_id, merge_suggestions_object_id, proposed_labels_object_id : str
+        Object ids of the three scratch tables.
+
+    Returns
+    -------
+    tuple
+        ``(metrics, merge_groups, labels)``, each exactly what
+        :func:`read_quality_metrics`, :func:`read_merge_suggestions` and
+        :func:`read_proposed_labels` return.
+    """
+    metrics_frame, merge_frame, labels_frame = read_table_frames(
+        abs_path,
+        object_ids=(
+            metrics_object_id,
+            merge_suggestions_object_id,
+            proposed_labels_object_id,
+        ),
+    )
+    return (
+        _quality_metrics_from_frame(metrics_frame),
+        _merge_suggestions_from_frame(merge_frame),
+        _proposed_labels_from_frame(labels_frame),
+    )

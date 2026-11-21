@@ -1,0 +1,217 @@
+"""``resolve_peak_sign`` maps a sorter params blob to a SI ``peak_sign``, so
+unit peak channel and amplitude follow the sorter's detection polarity.
+
+- clusterless_thresholder: ``peak_sign``.
+- MountainSort 4/5: ``detect_sign`` (-1/0/1).
+- SpykingCircus2: ``detection.method_kwargs.peak_sign``.
+- Kilosort4: ``invert_sign``.
+- Otherwise: ``"neg"``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from spyglass.spikesorting.v2._core.signal_math import resolve_peak_sign
+
+
+def _pos_neg_analyzer():
+    """A 2-channel analyzer with one unit whose template has a small POSITIVE
+    peak on channel 0 and a larger NEGATIVE deflection on channel 1.
+
+    The abs-max channel is 1; the positive-peak channel is 0, so ``peak_sign``
+    decides which electrode a unit is attributed to. Returns
+    ``(analyzer, sorting)``.
+    """
+    import numpy as np
+    import spikeinterface as si
+    from probeinterface import Probe
+
+    fs = 30000.0
+    n = 3000
+    rng = np.random.default_rng(0)
+    traces = (rng.standard_normal((n, 2)) * 2.0).astype("float32")
+    spikes = np.array([500, 1000, 1500, 2000, 2500])
+    w = 15
+    shape = np.exp(-(np.arange(-w, w + 1) ** 2) / (2 * 5.0**2))
+    for f in spikes:
+        traces[f - w : f + w + 1, 0] += (50.0 * shape).astype("float32")
+        traces[f - w : f + w + 1, 1] += (-100.0 * shape).astype("float32")
+
+    rec = si.NumpyRecording(traces_list=[traces], sampling_frequency=fs)
+    rec.set_channel_gains(1.0)
+    rec.set_channel_offsets(0.0)
+    probe = Probe(ndim=2)
+    probe.set_contacts(
+        positions=[[0.0, 0.0], [0.0, 20.0]],
+        shapes="circle",
+        shape_params={"radius": 5},
+    )
+    probe.set_device_channel_indices([0, 1])
+    rec = rec.set_probe(probe)
+    sort = si.NumpySorting.from_samples_and_labels(
+        [spikes], [np.zeros(len(spikes), dtype=int)], fs
+    )
+    analyzer = si.create_sorting_analyzer(sort, rec, sparse=False)
+    analyzer.compute(["random_spikes", "templates"])
+    return analyzer, sort
+
+
+@pytest.mark.parametrize(
+    "params,expected",
+    [
+        ({"peak_sign": "neg"}, "neg"),
+        ({"peak_sign": "pos"}, "pos"),
+        ({"peak_sign": "both"}, "both"),
+        ({"detect_sign": -1}, "neg"),
+        ({"detect_sign": 1}, "pos"),
+        ({"detect_sign": 0}, "both"),
+        # SpykingCircus2 (SI 0.104) nests the detection polarity.
+        ({"detection": {"method_kwargs": {"peak_sign": "pos"}}}, "pos"),
+        ({"detection": {"method": "matched_filtering"}}, "neg"),
+        # Kilosort4 expects negative-going spikes; invert_sign flips the data.
+        ({"invert_sign": True}, "pos"),
+        ({"invert_sign": False}, "neg"),
+        ({"detect_threshold": 100.0}, "neg"),  # no sign field -> default
+        ({}, "neg"),
+    ],
+)
+def test_resolve_peak_sign(params, expected):
+    assert resolve_peak_sign(params) == expected
+
+
+def test_peak_sign_takes_precedence_over_detect_sign():
+    """An explicit ``peak_sign`` wins over ``detect_sign`` (defensive; no
+    shipped schema carries both)."""
+    assert resolve_peak_sign({"peak_sign": "pos", "detect_sign": -1}) == "pos"
+
+
+def test_non_mapping_defaults_to_neg():
+    """A missing/None params blob falls back to ``"neg"`` rather than
+    raising."""
+    assert resolve_peak_sign(None) == "neg"
+
+
+def test_peak_sign_pos_attributes_positive_going_channel():
+    """A unit with a positive peak on one channel and a larger negative
+    deflection on another is attributed to the positive channel under
+    ``peak_sign='pos'`` and to the negative one under ``'neg'``.
+    """
+    from spikeinterface.core import template_tools
+
+    analyzer, _ = _pos_neg_analyzer()
+
+    pos_chan = template_tools.get_template_extremum_channel(
+        analyzer, peak_sign="pos", outputs="id"
+    )
+    neg_chan = template_tools.get_template_extremum_channel(
+        analyzer, peak_sign="neg", outputs="id"
+    )
+    # The configured sign genuinely changes the attributed channel.
+    assert int(pos_chan[0]) == 0, "pos peak_sign must attribute the +channel"
+    assert int(neg_chan[0]) == 1, "neg peak_sign attributes the -channel"
+    assert int(pos_chan[0]) != int(neg_chan[0])
+
+    # resolve_peak_sign maps the sorter params to the sign used for
+    # attribution.
+    assert resolve_peak_sign({"peak_sign": "pos"}) == "pos"
+
+
+@pytest.mark.parametrize(
+    "sorter_params, expected_electrode_id",
+    [
+        ({"peak_sign": "pos"}, 0),  # positive-going channel
+        ({"detect_sign": 1}, 0),  # MountainSort positive
+        ({"peak_sign": "neg"}, 1),  # negative-going channel
+        ({"detect_sign": -1}, 1),  # MountainSort negative
+    ],
+)
+def test_peak_sign_persists_attributed_electrode(
+    sorter_params, expected_electrode_id
+):
+    """The sorter's polarity determines the ``Sorting.Unit`` row's
+    ``electrode_id``, through ``resolve_peak_sign`` ->
+    ``get_template_extremum_channel`` -> ``build_sorting_unit_rows``.
+    """
+    from spikeinterface.core import template_tools
+
+    from spyglass.spikesorting.v2._sorting.units import build_sorting_unit_rows
+
+    analyzer, sorting = _pos_neg_analyzer()
+
+    # The attribution sequence of build_unit_rows_from_analyzer, without DB.
+    peak_sign = resolve_peak_sign(sorter_params)
+    peak_channels = template_tools.get_template_extremum_channel(
+        analyzer, peak_sign=peak_sign, outputs="id"
+    )
+    peak_amplitudes = template_tools.get_template_extremum_amplitude(
+        analyzer, peak_sign=peak_sign, mode="extremum"
+    )
+    unit_ids = list(sorting.unit_ids)
+    # The sort group owns both channels; ids match the analyzer's channel ids.
+    electrode_by_id = {
+        ch: {
+            "nwb_file_name": "synthetic.nwb",
+            "electrode_group_name": "0",
+            "electrode_id": int(ch),
+        }
+        for ch in (0, 1)
+    }
+
+    rows = build_sorting_unit_rows(
+        unit_ids=unit_ids,
+        peak_channels=peak_channels,
+        peak_amplitudes=peak_amplitudes,
+        n_spikes_by_unit={
+            u: len(sorting.get_unit_spike_train(unit_id=u)) for u in unit_ids
+        },
+        electrode_by_id=electrode_by_id,
+        key={"sorting_id": "synthetic", "curation_id": 0},
+        sort_group_id=0,
+        nwb_file_name="synthetic.nwb",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["electrode_id"] == expected_electrode_id, (
+        f"sorter params {sorter_params} resolve to peak_sign {peak_sign!r}, "
+        f"which must attribute the unit to electrode {expected_electrode_id}"
+    )
+
+
+def test_ensure_extensions_computes_amplitudes_at_the_sort_polarity():
+    """Spike amplitudes are read at the sort's polarity, not SI's ``"neg"``."""
+    from spyglass.spikesorting.v2._sorting.analyzer import ensure_extensions
+
+    analyzer, _ = _pos_neg_analyzer()
+    ensure_extensions(analyzer, ["spike_amplitudes"], peak_sign="pos")
+
+    extension = analyzer.get_extension("spike_amplitudes")
+    assert extension.params["peak_sign"] == "pos"
+    assert (extension.get_data() > 0).all()
+
+
+@pytest.mark.parametrize("metric", ["snr", "sd_ratio", "nn_advanced"])
+def test_apply_metric_peak_sign_sets_every_polarity_metric(metric):
+    from spyglass.spikesorting.v2._curation.metrics import (
+        apply_metric_peak_sign,
+    )
+
+    kwargs = {metric: {"peak_sign": "neg", "other": 1}}
+    out = apply_metric_peak_sign([metric], kwargs, "pos")
+    assert out[metric] == {"peak_sign": "pos", "other": 1}
+    assert kwargs[metric]["peak_sign"] == "neg"
+
+
+def test_validator_rejects_amplitudes_at_another_polarity():
+    """A cached analyzer whose amplitudes used another polarity is invalid."""
+    from spyglass.spikesorting.v2._sorting.analyzer import (
+        analyzer_sparsity_validator,
+        ensure_extensions,
+    )
+
+    analyzer, _ = _pos_neg_analyzer()
+    ensure_extensions(analyzer, ["spike_amplitudes"], peak_sign="neg")
+
+    analyzer_sparsity_validator(lambda: {"peak_sign": "neg"})(analyzer)
+    with pytest.raises(ValueError, match="spike_amplitudes"):
+        analyzer_sparsity_validator(lambda: {"peak_sign": "pos"})(analyzer)
