@@ -8,6 +8,34 @@ import pytest
 import uuid
 
 
+def test_public_curation_api_is_reexported():
+    """Facade value objects are discoverable beside the pipeline runner."""
+    from spyglass.spikesorting.v2 import pipeline
+    from spyglass.spikesorting.v2.curation_api import (
+        CurationRef,
+        EvaluationResult,
+        EvaluationSpec,
+        MergeEvaluateReceipt,
+        RunResult,
+    )
+    from spyglass.spikesorting.v2.review_api import (
+        CurationChangeSet,
+        FigPackReview,
+        ReviewImportReceipt,
+        ReviewProfileRef,
+    )
+
+    assert pipeline.CurationRef is CurationRef
+    assert pipeline.EvaluationResult is EvaluationResult
+    assert pipeline.EvaluationSpec is EvaluationSpec
+    assert pipeline.MergeEvaluateReceipt is MergeEvaluateReceipt
+    assert pipeline.RunResult is RunResult
+    assert pipeline.ReviewProfileRef is ReviewProfileRef
+    assert pipeline.FigPackReview is FigPackReview
+    assert pipeline.CurationChangeSet is CurationChangeSet
+    assert pipeline.ReviewImportReceipt is ReviewImportReceipt
+
+
 def test_merge_id_lookup_is_a_declared_curation_api_export():
     """The documented merge-id lookup is in ``curation_api.__all__``."""
     from spyglass.spikesorting.v2 import curation_api
@@ -47,6 +75,114 @@ def _single_session_run_summary():
         "auto_labeled_merge_id": "44444444-4444-4444-4444-444444444444",
         "warnings": ["zero spikes in one span", "check the reference"],
     }
+
+
+def test_run_result_summary_states_stages_curations_and_warnings(
+    monkeypatch,
+):
+    """A run receipt reads as stages, both curations and every warning.
+
+    It says both merge ids hold every unit and names the call that chooses
+    the analysis units, without reading the database.
+    """
+    from spyglass.spikesorting.v2.curation_api import CurationRef, RunResult
+
+    def _no_db(self):
+        raise AssertionError("summary() must not read the database")
+
+    monkeypatch.setattr(CurationRef, "_current_row", _no_db)
+    summary = _single_session_run_summary()
+    text = RunResult(summary).summary()
+
+    assert "n_units=12" in text
+    for stage, status in (
+        ("recording", "reused"),
+        ("artifact_detection", "computed"),
+        ("sorting", "computed"),
+        ("curation", "computed"),
+        ("auto_curation", "computed"),
+    ):
+        assert f"{stage} {status}" in text
+    assert summary["root_merge_id"] in text
+    assert summary["auto_labeled_merge_id"] in text
+    assert text.count("every unit") >= 2
+    for warning in summary["warnings"]:
+        assert warning in text
+    assert "select_units_for_analysis(" in text
+    assert "describe_run(" in text
+
+
+def test_run_result_summary_lists_concat_member_merge_ids():
+    """A concat receipt points at its per-member merge ids."""
+    from spyglass.spikesorting.v2.curation_api import RunResult
+
+    summary = _single_session_run_summary()
+    summary.update(
+        source_mode="concat",
+        root_merge_id=None,
+        auto_labeled_merge_id=None,
+        member_merge_ids={
+            0: "55555555-5555-5555-5555-555555555555",
+            1: "66666666-6666-6666-6666-666666666666",
+        },
+        warnings=[],
+    )
+    text = RunResult(summary).summary()
+
+    for member_index, merge_id in summary["member_merge_ids"].items():
+        assert f"{member_index} -> {merge_id}" in text
+    assert "member merge ids" in text
+
+
+def test_start_review_warns_when_the_profile_scores_other_recipes(
+    monkeypatch, caplog
+):
+    """Reviewing auto-labels with a profile whose metric or rule recipe
+    differs from the run's preset warns and names both recipes."""
+    from types import SimpleNamespace
+
+    from spyglass.spikesorting.v2 import review_api
+    from spyglass.spikesorting.v2.curation_api import RunResult
+
+    profile = SimpleNamespace(
+        review_profile_name="franklab_hippocampus_2026_09_17",
+        evaluation_spec=SimpleNamespace(
+            metric_params_name="franklab_default",
+            auto_curation_rules_name="franklab_default_auto_curation_2026_09",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api.ReviewProfileRef, "resolve", lambda name: profile
+    )
+    started = []
+    curation = SimpleNamespace(
+        start_review=lambda *args, **kwargs: started.append(args) or "review"
+    )
+    monkeypatch.setattr(RunResult, "_pinned_ref", lambda self, *a: curation)
+
+    def warnings_for(preset):
+        caplog.clear()
+        run = RunResult(
+            {**_single_session_run_summary(), "pipeline_preset": preset}
+        )
+        with caplog.at_level("WARNING", logger="spyglass"):
+            assert run.start_review(profile.review_profile_name) == "review"
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if "start_review" in r.getMessage()
+        ]
+
+    mismatched = warnings_for("franklab_neuropixels_ks4_2026_06")
+    assert len(mismatched) == 1, mismatched
+    message = mismatched[0]
+    assert "franklab_hippocampus_2026_09_17" in message
+    assert "franklab_neuropixels_ks4_2026_06" in message
+    assert "franklab_default_auto_curation_2026_09" in message
+    assert "neuropixels_default" in message
+    assert "describe_review_profiles()" in message
+    assert warnings_for("franklab_probe_hippocampus_30khz_ms4_2026_06") == []
+    assert len(started) == 2
 
 
 def test_non_root_facade_requires_typed_parent():

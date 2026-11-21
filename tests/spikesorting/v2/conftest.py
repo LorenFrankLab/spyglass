@@ -226,6 +226,12 @@ def _guard_unit_tier_database_access(request, monkeypatch):
     # real ``dj.Connection.query`` even if the test also patches it.
     monkeypatch.setattr(dj.Connection, "connect", refuse)
     monkeypatch.setattr(dj.Connection, "query", refuse)
+    # Preset listings read PipelinePreset; the unit tier sees only code presets.
+    from spyglass.spikesorting.v2._orchestration import presets
+
+    monkeypatch.setattr(
+        presets, "_saved_pipeline_presets", lambda name=None: {}
+    )
     yield
 
 
