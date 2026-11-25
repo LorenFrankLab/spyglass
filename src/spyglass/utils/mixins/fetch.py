@@ -69,8 +69,9 @@ class FetchMixin(BaseMixin):
             custom_class = AnalysisRegistry().get_class(analysis_parents[0])
             if custom_class is None:
                 raise ValueError(
-                    f"Custom analysis table '{analysis_parents[0]}' "
-                    "not found in registry"
+                    f"Custom analysis table '{analysis_parents[0]}' is not "
+                    "reachable: the table may be undeclared, or invisible to "
+                    "this account."
                 )
             return (custom_class, "analysis_file_abs_path")
 

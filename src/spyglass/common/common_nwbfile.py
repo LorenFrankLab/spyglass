@@ -21,6 +21,7 @@ from spyglass.common._nwbfile_cleanup import (
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import (
     _acquire_nwb_file,
@@ -217,7 +218,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 
 @schema
-class AnalysisRegistry(dj.Manual):
+class AnalysisRegistry(BaseMixin, dj.Manual):
     """Central registry tracking all custom AnalysisNwbfile tables.
 
     This table maintains a record of all team-specific AnalysisNwbfile tables
@@ -386,11 +387,13 @@ class AnalysisRegistry(dj.Manual):
             database not in dj.list_schemas()
             or table_name not in dj.Schema(database).list_tables()
         ):
-            raise dj.errors.MissingTableError(
-                f"Cannot create class for missing table: {full_name}. "
-                "Ensure the schema is created and you have permissions to it."
-                f"with dj.list_schemas(); dj.Schema({database}).list_tables()"
+            cls()._warn_msg(
+                f"Registered table is not reachable: {full_name}. The schema "
+                + "may have been created without the table, or be invisible "
+                + "to this account. Inspect with dj.list_schemas() and "
+                + f"dj.Schema('{database}').list_tables()."
             )
+            return None
 
         class AnalysisMeta(type):
             """Metaclass for custom AnalysisNwbfile classes."""
@@ -504,13 +507,19 @@ class AnalysisRegistry(dj.Manual):
         Returns
         -------
         class_objs : list of dj.FreeTable
-            A list of all registered analysis table class objects.
+            A list of all registered analysis table class objects. Entries
+            whose table is not declared are skipped.
         """
-        return [
-            self._get_tbl_from_name(key["full_table_name"])()
+        # `_get_tbl_from_name` returns None for a registered table that is not
+        # declared -- a schema created without its table, or one this account
+        # cannot see. Filter before instantiating: `None()` raises TypeError
+        # and takes down every caller, including check_all_files.
+        classes = [
+            self._get_tbl_from_name(key["full_table_name"])
             for key in self.fetch(as_dict=True)
             if self._is_valid_entry(key["full_table_name"], raise_err=False)
         ]
+        return [tbl_cls() for tbl_cls in classes if tbl_cls is not None]
 
     @classmethod
     def clear_cache(cls):
