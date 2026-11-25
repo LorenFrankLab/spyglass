@@ -3,7 +3,8 @@
 1. PathScanner - state per on-disk condition
 2. TrackedPath - declaration validation
 3. check_missing() - findings, exclusions, coverage
-4. MissingPath - lost, unreadable, refresh_missing, last_covered_run
+4. run_all, refresh_all, summary - orchestration
+5. MissingPath - lost, unreadable, refresh_missing, last_covered_run
 """
 
 import os
@@ -336,6 +337,89 @@ def test_refresh_drops_recovered_paths(
         shutil.rmtree(target)
         tracked_table.check_missing()
         assert (MissingPath() & mine).fetch1("run_id") > first_run
+    finally:
+        (MissingPath() & mine).delete_quick()
+        tracked_table.delete_quick()
+
+
+# =============================== run_all =====================================
+
+
+def test_run_all_covers_every_declared_table(
+    tracked_table, tracking_tables, tmp_path
+):
+    """One run_all covers all declared tables under a single run_id.
+
+    One run across tables is what lets `last_covered_run` compare like
+    with like.
+    """
+    CheckMissingRun, MissingPath = tracking_tables
+    tracked_table.insert1(dict(holder_id=7, some_path=str(tmp_path / "gone")))
+    mine = {"full_table_name": tracked_table.full_table_name}
+
+    try:
+        run_id = CheckMissingRun().run_all(verbose=False)
+        assert run_id is not None
+
+        covered = CheckMissingRun.Coverage & {"run_id": run_id}
+        # The fixture table registers, so a real run reaches it
+        assert len(covered & mine) == 1
+        # Closed in a finally, so the run is stamped either way
+        assert (CheckMissingRun & {"run_id": run_id}).fetch1("finished")
+    finally:
+        (MissingPath() & mine).delete_quick()
+        tracked_table.delete_quick()
+
+
+def test_run_all_only_filters_by_class_name(tracking_tables):
+    """`only` naming no registered table records nothing and says so."""
+    CheckMissingRun, _ = tracking_tables
+    before = len(CheckMissingRun())
+
+    assert CheckMissingRun().run_all(only=["NotATable"], verbose=False) is None
+    assert len(CheckMissingRun()) == before  # no run opened
+
+
+def test_run_all_survives_a_failing_table(
+    tracked_table, tracking_tables, monkeypatch
+):
+    """A table that raises leaves its coverage absent, not the run dead.
+
+    Absent coverage is how a partial run stays visible to
+    `last_covered_run`, rather than passing as clean.
+    """
+    CheckMissingRun, _ = tracking_tables
+
+    def boom(self, *args, **kwargs):
+        raise RuntimeError("scan exploded")
+
+    monkeypatch.setattr(type(tracked_table), "check_missing", boom)
+
+    run_id = CheckMissingRun().run_all(verbose=False)
+
+    assert run_id is not None  # the run still completed and closed
+    gap = CheckMissingRun.Coverage & {
+        "run_id": run_id,
+        "full_table_name": tracked_table.full_table_name,
+    }
+    assert len(gap) == 0
+
+
+def test_summary_returns_coverage_for_a_run(
+    tracked_table, tracking_tables, tmp_path
+):
+    """summary() hands the report a frame, defaulting to the latest run."""
+    CheckMissingRun, MissingPath = tracking_tables
+    tracked_table.insert1(dict(holder_id=8, some_path=str(tmp_path / "gone")))
+    mine = {"full_table_name": tracked_table.full_table_name}
+
+    try:
+        run_id = CheckMissingRun().run_all(verbose=False)
+        frame = CheckMissingRun().summary(run_id)
+
+        assert not frame.empty
+        assert set(frame.columns) >= {"attr", "n_checked", "n_missing"}
+        assert CheckMissingRun().summary().equals(frame)  # latest by default
     finally:
         (MissingPath() & mine).delete_quick()
         tracked_table.delete_quick()

@@ -1,9 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import datajoint as dj
+import pandas as pd
 from datajoint.hash import uuid_from_file
 from datajoint.logging import logger as dj_logger
 from tqdm import tqdm
@@ -561,6 +562,178 @@ class CheckMissingRun(dj.Manual):
             Run to stamp.
         """
         self.update1(dict(run_id=run_id, finished=datetime.now()))
+
+    @staticmethod
+    def _import_declaring_modules() -> None:
+        """Import the modules that declare tracked paths.
+
+        A table registers itself when its module is imported, so something
+        has to do the importing. A module missing here is missing from
+        `Coverage` too, which reads as uncovered rather than as clean.
+        """
+        import spyglass.behavior.v1.moseq  # noqa: F401
+        import spyglass.position.v1.position_dlc_model  # noqa: F401
+        import spyglass.position.v1.position_dlc_pose_estimation  # noqa: F401
+        import spyglass.position.v1.position_dlc_project  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_curation  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_recording  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_sorting  # noqa: F401
+
+    def _scheduled(self, only: Optional[List[str]] = None) -> List:
+        """Return the tables to scan, smallest first.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Class names to keep. Default all registered.
+
+        Returns
+        -------
+        tables : list
+            Declaring tables ordered by row count, so the cheap ones report
+            before a 200k-row walk starts.
+        """
+        from spyglass.utils.mixins import PathTrackingMixin
+
+        self._import_declaring_modules()
+        tables = PathTrackingMixin.tracking_tables()
+
+        if only:
+            tables = [t for t in tables if t.__class__.__name__ in only]
+
+        return sorted(tables, key=len)
+
+    def run_all(
+        self,
+        only: Optional[List[str]] = None,
+        max_workers: int = 32,
+        verbose: bool = True,
+    ) -> Optional[int]:
+        """Scan every table that declares tracked paths, under one run.
+
+        One run across all tables, so `MissingPath.last_covered_run`
+        compares like with like.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Limit to these table class names. Default all registered.
+        max_workers : int, optional
+            Threads used to stat paths. Default 16.
+        verbose : bool, optional
+            Show a progress bar per attribute. Default True.
+
+        Returns
+        -------
+        run_id : int or None
+            The run recorded, or None when no table matched.
+        """
+        scheduled = self._scheduled(only)
+        if not scheduled:
+            logger.error(f"No declaring table matched {only}")
+            return None
+
+        run_id = self.open()
+        logger.info(f"check_missing run {run_id}: {len(scheduled)} tables")
+
+        try:
+            for tbl in scheduled:
+                name = tbl.__class__.__name__
+                try:
+                    counts = tbl.check_missing(
+                        run_id=run_id,
+                        max_workers=max_workers,
+                        verbose=verbose,
+                    )
+                except Exception as err:  # one table must not end the run
+                    logger.error(
+                        f"{name} failed, leaving its coverage absent: "
+                        f"{type(err).__name__}: {err}"
+                    )
+                    continue
+                for attr, n_missing in counts.items():
+                    logger.info(f"  {name}.{attr}: {n_missing} missing")
+        finally:
+            self.close(run_id)
+
+        # Two different questions. A path recorded by an earlier run keeps
+        # that run_id, so 'newly recorded' is 0 on a run finding the same
+        # losses as the last. Reporting only that reads as all-clear.
+        newly = len(MissingPath() & {"run_id": run_id})
+        logger.info(
+            f"run {run_id}: {newly} newly recorded, "
+            f"{len(MissingPath().lost)} missing in total"
+        )
+
+        return run_id
+
+    def refresh_all(
+        self,
+        only: Optional[List[str]] = None,
+        max_workers: int = 16,
+        verbose: bool = True,
+    ) -> int:
+        """Drop recorded paths that are present again, across all tables.
+
+        Re-stats only what is recorded, so it costs a fraction of a scan.
+        Run it after a restore rather than on a schedule.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Limit to these table class names. Default all registered.
+        max_workers : int, optional
+            Threads used to stat paths. Default 16.
+        verbose : bool, optional
+            Show a progress bar per attribute. Default True.
+
+        Returns
+        -------
+        n_recovered : int
+            Rows dropped because the path is present.
+        """
+        n_recovered = 0
+
+        for tbl in self._scheduled(only):
+            try:
+                n_recovered += tbl.refresh_missing(
+                    max_workers=max_workers, verbose=verbose
+                )
+            except Exception as err:
+                logger.error(
+                    f"{tbl.__class__.__name__} refresh failed: "
+                    f"{type(err).__name__}: {err}"
+                )
+
+        logger.info(f"{n_recovered} recovered paths dropped")
+
+        return n_recovered
+
+    def summary(self, run_id: Optional[int] = None) -> pd.DataFrame:
+        """Return one run's coverage, a row per attribute scanned.
+
+        Parameters
+        ----------
+        run_id : int, optional
+            Run to describe. Default the most recent.
+
+        Returns
+        -------
+        coverage : pd.DataFrame
+            Empty when the run reached nothing.
+        """
+        if run_id is None:
+            run_ids = self.fetch("run_id")
+            if not len(run_ids):
+                return pd.DataFrame()
+            run_id = max(run_ids)
+
+        rows = (self.Coverage & {"run_id": run_id}).fetch(as_dict=True)
+        frame = pd.DataFrame(rows)
+
+        return (
+            frame.sort_values("n_missing", ascending=False) if rows else frame
+        )
 
 
 @schema2
