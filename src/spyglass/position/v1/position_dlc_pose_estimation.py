@@ -23,6 +23,7 @@ from spyglass.position.v1.dlc_utils import (
 from spyglass.position.v1.position_dlc_model import DLCModel
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 
 from . import dlc_reader
 
@@ -30,7 +31,7 @@ schema = dj.schema("position_v1_dlc_pose_estimation")
 
 
 @schema
-class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
+class DLCPoseEstimationSelection(PathTrackingMixin, SpyglassMixin, dj.Manual):
     definition = """
     -> VideoFile                           # Session -> Recording + File part table
     -> DLCModel                                    # Must specify a DLC project_path
@@ -41,6 +42,13 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     pose_estimation_params=null  : longblob     # analyze_videos params, if not default
     """
     log_path = None
+
+    # Every stored `pose_estimation_output_dir` is absolute, despite the
+    # comment above it
+    _tracked_paths = (
+        TrackedPath("video_path", kind="file"),
+        TrackedPath("pose_estimation_output_dir", kind="dir"),
+    )
 
     @classmethod
     def get_video_crop(cls, video_path, crop_input=None):

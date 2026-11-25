@@ -14,6 +14,7 @@ from spyglass.position.utils_dlc import test_mode_suppress
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 from spyglass.utils.dj_helper_fn import sanitize_unix_name
 
 schema = dj.schema("position_v1_dlc_project")
@@ -55,7 +56,7 @@ class BodyPart(SpyglassMixin, dj.Manual):
 
 
 @schema
-class DLCProject(SpyglassMixin, dj.Manual):
+class DLCProject(PathTrackingMixin, SpyglassMixin, dj.Manual):
     """Table to facilitate creation of a new DeepLabCut model.
     With ability to edit config, extract frames, label frames
     """
@@ -70,6 +71,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
     """
 
     # NOTE: #1534, config~path: varchar(120) -> varchar(255)
+
+    _tracked_paths = (TrackedPath("config_path", kind="file"),)
 
     class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""

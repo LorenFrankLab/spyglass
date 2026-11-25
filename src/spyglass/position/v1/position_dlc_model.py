@@ -9,6 +9,7 @@ from spyglass.position.v1 import dlc_reader
 from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
 from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 from spyglass.utils.dj_helper_fn import str_to_bool
 
 schema = dj.schema("position_v1_dlc_model")
@@ -179,7 +180,7 @@ class DLCModelSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class DLCModel(SpyglassMixin, dj.Computed):
+class DLCModel(PathTrackingMixin, SpyglassMixin, dj.Computed):
     definition = """
     -> DLCModelSelection
     ---
@@ -197,6 +198,8 @@ class DLCModel(SpyglassMixin, dj.Computed):
     model_description='' : varchar(1000)
     """
     # project_path is the only item required downstream in the pose schema
+
+    _tracked_paths = (TrackedPath("project_path", kind="dir"),)
 
     class BodyPart(SpyglassMixin, dj.Part):  # noqa: F811
         definition = """
