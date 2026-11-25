@@ -360,6 +360,30 @@ class AnalysisRegistry(BaseMixin, dj.Manual):
 
         return err is None
 
+    def _is_reachable(self, full_table_name: str) -> bool:
+        """Check whether a registered table is declared and visible.
+
+        Parameters
+        ----------
+        full_table_name : str
+            The full table name.
+
+        Returns
+        -------
+        reachable : bool
+            True if the schema exists and declares the table. True for a
+            malformed name, which `_is_valid_entry` reports instead.
+        """
+        try:
+            database, table_name, _, _ = self._parse_table_name(full_table_name)
+        except ValueError:
+            return True
+
+        return (
+            database in dj.list_schemas()
+            and table_name in dj.Schema(database).list_tables()
+        )
+
     @classmethod
     def _create_class(cls, full_name: str) -> type:
         """Create an enhanced custom analysis table class.
@@ -380,19 +404,10 @@ class AnalysisRegistry(BaseMixin, dj.Manual):
         type
             Enhanced table class with helper methods
         """
-        database, table_name, prefix, _ = cls._parse_table_name(full_name)
+        _, table_name, prefix, _ = cls._parse_table_name(full_name)
         camel_name = dj.utils.to_camel_case(table_name)
 
-        if (
-            database not in dj.list_schemas()
-            or table_name not in dj.Schema(database).list_tables()
-        ):
-            cls()._warn_msg(
-                f"Registered table is not reachable: {full_name}. The schema "
-                + "may have been created without the table, or be invisible "
-                + "to this account. Inspect with dj.list_schemas() and "
-                + f"dj.Schema('{database}').list_tables()."
-            )
+        if not cls()._is_reachable(full_name):
             return None
 
         class AnalysisMeta(type):
@@ -510,10 +525,7 @@ class AnalysisRegistry(BaseMixin, dj.Manual):
             A list of all registered analysis table class objects. Entries
             whose table is not declared are skipped.
         """
-        # `_get_tbl_from_name` returns None for a registered table that is not
-        # declared -- a schema created without its table, or one this account
-        # cannot see. Filter before instantiating: `None()` raises TypeError
-        # and takes down every caller, including check_all_files.
+        # `_get_tbl_from_name` returns None for an unreachable table
         classes = [
             self._get_tbl_from_name(key["full_table_name"])
             for key in self.fetch(as_dict=True)
@@ -677,6 +689,14 @@ class AnalysisRegistry(BaseMixin, dj.Manual):
         # with the same stable registry snapshot then contend on the same first
         # trigger rather than each creating a different prefix of the set.
         tables = sorted(set(self.fetch("full_table_name")))
+
+        # An unreachable table has no insert path to block
+        reachable = [t for t in tables if self._is_reachable(t)]
+        if skipped := [t for t in tables if t not in reachable]:
+            self._warn_msg(
+                "Skipping unreachable registered tables: " + ", ".join(skipped)
+            )
+        tables = reachable
 
         # Inspect every table before any DDL. A pre-existing trigger is either
         # owned by an active cleanup or stale after a failed one; adopting it

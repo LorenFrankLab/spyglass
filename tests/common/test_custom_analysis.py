@@ -382,6 +382,34 @@ class TestCleanupAndRegistry:
             ).delete_quick()
             AnalysisRegistry.clear_cache()
 
+    def test_block_inserts_skips_unreachable_table(
+        self, analysis_registry, custom_analysis_table
+    ):
+        """An unreachable registry entry does not stop insert blocking.
+
+        CREATE TRIGGER on an undeclared table errors, which would take the
+        whole cleanup with it.
+        """
+        from spyglass.common.common_nwbfile import AnalysisRegistry
+
+        unreachable = "`unreachableprefix_nwbfile`.`analysis_nwbfile`"
+        analysis_registry.insert1(unreachable)
+        AnalysisRegistry.clear_cache()
+
+        try:
+            analysis_registry.block_new_inserts()
+            blocked = analysis_registry._block_exists(
+                custom_analysis_table.full_table_name
+            )
+            assert blocked, "reachable table was not blocked"
+            assert not analysis_registry._block_exists(unreachable)
+        finally:
+            analysis_registry.unblock_new_inserts()
+            (
+                analysis_registry & {"full_table_name": unreachable}
+            ).delete_quick()
+            AnalysisRegistry.clear_cache()
+
     @pytest.mark.slow
     def test_orphan_detection_across_tables(
         self,
