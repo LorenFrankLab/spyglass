@@ -17,13 +17,23 @@ regularly as cron jobs.
         called either `temp` or `tmp`.
     - This script also fetches the latest version information from PyPI to update
         the `SpyglassVersions` table.
+- `check_missing.py`
+    - Records database-tracked paths that are absent from disk, the inverse of
+        what `cleanup.py` looks for.
+    - Writes a summary to `CHECK_MISSING_OUT` only when the run records a path for
+        the first time. A run finding the same losses as the last records nothing,
+        so an unconditional report would never change.
+    - Kept out of `cleanup.py` so that a cleanup failure cannot stop it.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
     - Reads from the `.env` file in the same directory.
     - Updates the spyglass repository, fetching from the master branch.
     - Runs a database connection check (relying on a valid datajoint config).
-    - Runs the `cleanup.py` script.
+    - Runs `check_missing.py`, then `cleanup.py`. That order is deliberate: a
+        `cleanup.py` failure exits this script, so a check placed after it would
+        be skipped by the breakage it exists to outlive.
+    - Emails and posts the `check_missing.py` summary when it is non-empty.
 - `check_disk_space.sh` - This script ...
     - Reads from the same `.env` file as `run_jobs.sh`.
     - Checks the disk space of each drive in `SPACE_CHECK_DRIVES`.
@@ -64,6 +74,8 @@ regularly as cron jobs.
             DataJoint installed.[^2]
         - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
         - `SPYGLASS_LOG`: the path to the log file.
+        - `CHECK_MISSING_OUT`: set by `run_jobs.sh` to a temp file; read here only
+            to document the handoff from `check_missing.py`.
         - Optional email settings. If not set, email notifications will not be
             sent.
             - `SPYGLASS_EMAIL_SRC`: The email address from which to send

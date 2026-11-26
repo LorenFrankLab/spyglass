@@ -22,6 +22,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecordingSelection,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 
 schema = dj.schema("spikesorting_sorting")
 
@@ -173,7 +174,7 @@ class SpikeSortingSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class SpikeSorting(SpyglassMixin, dj.Computed):
+class SpikeSorting(PathTrackingMixin, SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingSelection
     ---
@@ -182,6 +183,15 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
+    # Sorts up to mid-2022 wrote `cached.json`, later ones `si_folder.json`.
+    # Testing only the newer name reads 1562 intact folders as partial.
+    _tracked_paths = (
+        TrackedPath(
+            "sorting_path",
+            kind="dir",
+            markers=("si_folder.json", "cached.json"),
+        ),
+    )
 
     def make_fetch(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the

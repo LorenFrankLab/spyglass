@@ -1,7 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 import datajoint as dj
+import pandas as pd
 from datajoint.hash import uuid_from_file
 from datajoint.logging import logger as dj_logger
 from tqdm import tqdm
@@ -11,6 +14,10 @@ from spyglass.settings import test_mode
 from spyglass.utils import SpyglassAnalysis, logger
 
 schema = dj.Schema("common_file_tracking")
+
+# TEMPORARY: the check_missing tables sit on a personal prefix while the
+# design settles. Fold into `schema` before merge.
+schema2 = dj.Schema("claude_missing")
 
 
 @schema
@@ -506,3 +513,301 @@ class AnalysisFileIssues(dj.Manual):
             logger.info("No issues found.")
 
         return ret or []
+
+
+@schema2
+class CheckMissingRun(dj.Manual):
+    """One `check_missing` pass over the tables that declare tracked paths."""
+
+    definition = """
+    run_id: int auto_increment
+    ---
+    started=CURRENT_TIMESTAMP: timestamp
+    finished=NULL: datetime
+    """
+
+    class Coverage(dj.Part):
+        definition = """
+        # What this run reached. Absence of a row means the scan did not run.
+        -> master
+        full_table_name: varchar(128)
+        attr: varchar(64)
+        ---
+        n_checked=0: int
+        n_missing=0: int
+        n_excluded=0: int  # intentionally absent, so never stat'd
+        completed=0: tinyint
+        """
+
+    def open(self) -> int:
+        """Record the start of a run.
+
+        Returns
+        -------
+        run_id : int
+            Key of the new run.
+        """
+        # DataJoint rejects a row with no named attributes
+        self.insert1(dict(started=datetime.now()))
+        # LAST_INSERT_ID is per connection, so it survives concurrent runs
+        return dj.conn().query("SELECT LAST_INSERT_ID()").fetchone()[0]
+
+    def close(self, run_id: int) -> None:
+        """Stamp a run as finished.
+
+        Parameters
+        ----------
+        run_id : int
+            Run to stamp.
+        """
+        self.update1(dict(run_id=run_id, finished=datetime.now()))
+
+    @staticmethod
+    def _import_declaring_modules() -> None:
+        """Import the modules that declare tracked paths.
+
+        A table registers itself when its module is imported, so something
+        has to do the importing. A module missing here is missing from
+        `Coverage` too, which reads as uncovered rather than as clean.
+        """
+        import spyglass.behavior.v1.moseq  # noqa: F401
+        import spyglass.position.v1.position_dlc_model  # noqa: F401
+        import spyglass.position.v1.position_dlc_pose_estimation  # noqa: F401
+        import spyglass.position.v1.position_dlc_project  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_curation  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_recording  # noqa: F401
+        import spyglass.spikesorting.v0.spikesorting_sorting  # noqa: F401
+
+    def _scheduled(self, only: Optional[List[str]] = None) -> List:
+        """Return the tables to scan, smallest first.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Class names to keep. Default all registered.
+
+        Returns
+        -------
+        tables : list
+            Declaring tables ordered by row count, so the cheap ones report
+            before a 200k-row walk starts.
+        """
+        from spyglass.utils.mixins import PathTrackingMixin
+
+        self._import_declaring_modules()
+        tables = PathTrackingMixin.tracking_tables()
+
+        if only:
+            tables = [t for t in tables if t.__class__.__name__ in only]
+
+        return sorted(tables, key=len)
+
+    def run_all(
+        self,
+        only: Optional[List[str]] = None,
+        max_workers: int = 32,
+        verbose: bool = True,
+    ) -> Optional[int]:
+        """Scan every table that declares tracked paths, under one run.
+
+        One run across all tables, so `MissingPath.last_covered_run`
+        compares like with like.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Limit to these table class names. Default all registered.
+        max_workers : int, optional
+            Threads used to stat paths. Default 16.
+        verbose : bool, optional
+            Show a progress bar per attribute. Default True.
+
+        Returns
+        -------
+        run_id : int or None
+            The run recorded, or None when no table matched.
+        """
+        scheduled = self._scheduled(only)
+        if not scheduled:
+            logger.error(f"No declaring table matched {only}")
+            return None
+
+        run_id = self.open()
+        logger.info(f"check_missing run {run_id}: {len(scheduled)} tables")
+
+        try:
+            for tbl in scheduled:
+                name = tbl.__class__.__name__
+                try:
+                    counts = tbl.check_missing(
+                        run_id=run_id,
+                        max_workers=max_workers,
+                        verbose=verbose,
+                    )
+                except Exception as err:  # one table must not end the run
+                    logger.error(
+                        f"{name} failed, leaving its coverage absent: "
+                        f"{type(err).__name__}: {err}"
+                    )
+                    continue
+                for attr, n_missing in counts.items():
+                    logger.info(f"  {name}.{attr}: {n_missing} missing")
+        finally:
+            self.close(run_id)
+
+        # A path recorded by an earlier run keeps that run_id, so a run
+        # finding the same losses records nothing new
+        newly = len(MissingPath() & {"run_id": run_id})
+        logger.info(
+            f"run {run_id}: {newly} newly recorded, "
+            f"{len(MissingPath().lost)} missing in total"
+        )
+
+        return run_id
+
+    def refresh_all(
+        self,
+        only: Optional[List[str]] = None,
+        max_workers: int = 16,
+        verbose: bool = True,
+    ) -> int:
+        """Drop recorded paths that are present again, across all tables.
+
+        Re-stats only what is recorded, so it costs a fraction of a scan.
+        Run it after a restore rather than on a schedule.
+
+        Parameters
+        ----------
+        only : list of str, optional
+            Limit to these table class names. Default all registered.
+        max_workers : int, optional
+            Threads used to stat paths. Default 16.
+        verbose : bool, optional
+            Show a progress bar per attribute. Default True.
+
+        Returns
+        -------
+        n_recovered : int
+            Rows dropped because the path is present.
+        """
+        n_recovered = 0
+
+        for tbl in self._scheduled(only):
+            try:
+                n_recovered += tbl.refresh_missing(
+                    max_workers=max_workers, verbose=verbose
+                )
+            except Exception as err:
+                logger.error(
+                    f"{tbl.__class__.__name__} refresh failed: "
+                    f"{type(err).__name__}: {err}"
+                )
+
+        logger.info(f"{n_recovered} recovered paths dropped")
+
+        return n_recovered
+
+    def summary(self, run_id: Optional[int] = None) -> pd.DataFrame:
+        """Return one run's coverage, a row per attribute scanned.
+
+        Parameters
+        ----------
+        run_id : int, optional
+            Run to describe. Default the most recent.
+
+        Returns
+        -------
+        coverage : pd.DataFrame
+            Empty when the run reached nothing.
+        """
+        if run_id is None:
+            run_ids = self.fetch("run_id")
+            if not len(run_ids):
+                return pd.DataFrame()
+            run_id = max(run_ids)
+
+        rows = (self.Coverage & {"run_id": run_id}).fetch(as_dict=True)
+        frame = pd.DataFrame(rows)
+
+        return (
+            frame.sort_values("n_missing", ascending=False) if rows else frame
+        )
+
+
+@schema2
+class MissingPath(dj.Manual):
+    """A tracked path that was absent or unreadable when a run looked.
+
+    Holds only paths that were not whole, so a row is a finding. `state`
+    separates a loss from a path the scan could not read.
+
+    One row per path. Where several entries share a path, `source_key` names
+    one of them, and `run_id` is the run that first recorded the path, not
+    every run that found it absent. So `MissingPath & {'run_id': n}` is what
+    run `n` discovered, while `CheckMissingRun.Coverage.n_missing` is what it
+    found absent, including paths an earlier run had already recorded.
+
+    A restored path is removed by `refresh_missing`, so a row always
+    describes a current absence. Dropping the row rather than flagging it
+    resolved keeps `run_id` tied to the absence it reports: a path lost,
+    restored and lost again gets a fresh row naming the second loss, and
+    `last_covered_run` bounds that loss rather than the first one.
+    """
+
+    definition = """
+    full_table_name: varchar(128)  # table that tracks the path
+    attr: varchar(64)              # attribute holding the path
+    path_hash: char(32)            # md5 of path, which is too long to key
+    ---
+    -> CheckMissingRun             # run that first recorded it
+    path: varchar(1000)
+    source_key: blob               # primary key of the row that tracks it
+    state: varchar(16)             # see check_missing.STATES
+    """
+
+    @property
+    def lost(self):
+        """Paths that are gone: the restore list.
+
+        Excludes unreadable paths, where presence is unknown.
+        """
+        from spyglass.utils.mixins.check_missing import LOST_STATES
+
+        return self & [{"state": state} for state in LOST_STATES]
+
+    @property
+    def unreadable(self):
+        """Findings where the scan could not determine presence."""
+        return self & "state='denied'"
+
+    def last_covered_run(self, key: dict) -> Optional[int]:
+        """Return the latest completed run of this attribute before the find.
+
+        The loss falls between that run and the one named by the finding.
+        None when no earlier run completed coverage of the attribute, which
+        is every finding of a first run.
+
+        Named for what it measures. Coverage is per attribute, not per path,
+        so a path whose row was created after that run resolves to it as
+        well. The interval still contains the loss, but the run did not
+        observe this path.
+
+        Parameters
+        ----------
+        key : dict
+            One `MissingPath` entry.
+
+        Returns
+        -------
+        run_id : int or None
+            Latest run that covered the attribute before this finding.
+        """
+        entry = (self & key).fetch1()
+        covered = CheckMissingRun.Coverage & {
+            "full_table_name": entry["full_table_name"],
+            "attr": entry["attr"],
+            "completed": 1,
+        }
+        earlier = [r for r in covered.fetch("run_id") if r < entry["run_id"]]
+
+        return max(earlier) if earlier else None

@@ -29,6 +29,7 @@ from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.settings import moseq_project_dir, moseq_video_dir
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 
 from .core import (
     PoseGroup,
@@ -127,7 +128,7 @@ class MoseqModelSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class MoseqModel(SpyglassMixin, dj.Computed):
+class MoseqModel(PathTrackingMixin, SpyglassMixin, dj.Computed):
     """Table to train and store moseq models"""
 
     definition = """
@@ -137,6 +138,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
     epochs_trained: int
     model_name = "": varchar(255)
     """
+
+    _tracked_paths = (TrackedPath("project_dir", kind="dir"),)
 
     # Make method trains a model and inserts it into the table
 

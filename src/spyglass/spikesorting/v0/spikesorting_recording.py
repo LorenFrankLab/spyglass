@@ -23,6 +23,7 @@ from spyglass.spikesorting.utils import (
     get_group_by_shank,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 from spyglass.utils.dj_helper_fn import dj_replace
 from spyglass.utils.nwb_hash import DirectoryHasher
 
@@ -334,7 +335,7 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class SpikeSortingRecording(SpyglassMixin, dj.Computed):
+class SpikeSortingRecording(PathTrackingMixin, SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingRecordingSelection
     ---
@@ -345,6 +346,39 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     _parallel_make = True
     _data_cache = dict()
+    _tracked_paths = (
+        TrackedPath("recording_path", kind="dir", exclude="_recompute_deleted"),
+    )
+
+    def _recompute_deleted(self) -> set:
+        """Return keys whose recording the recompute workflow removed.
+
+        Recordings are pruned deliberately once a recompute matches, so
+        their absence is intended rather than a loss.
+
+        Only v0 recompute is consulted. Its key extends this table's, while
+        v1 recompute is keyed on `recording_id` and describes v1 recordings,
+        which are a different table's to declare.
+
+        Returns
+        -------
+        keys : set of tuple
+            Primary key tuples to skip.
+        """
+        pk = list(self.primary_key)
+
+        try:
+            # Lazy: spikesorting_recompute imports this module
+            from spyglass.spikesorting.v0.spikesorting_recompute import (
+                RecordingRecompute,
+            )
+
+            rows = (RecordingRecompute() & "deleted=1").fetch(*pk, as_dict=True)
+        except Exception as err:
+            self._warn_msg(f"Could not fetch recompute-deleted keys: {err}")
+            return set()
+
+        return {tuple(row[k] for k in pk) for row in rows}
 
     def make_fetch(self, key: dict) -> List[Interval]:
         """Fetch times for compute.

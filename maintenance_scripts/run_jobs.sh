@@ -100,6 +100,22 @@ if $SPYGLASS_CHMOD_FILES; then
     { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
 fi
 
+# Record database-tracked paths missing from disk. Runs before cleanup.py,
+# which exits this script on failure, and does not exit on its own failure.
+CHECK_MISSING_OUT=$(mktemp)
+CHECK_MISSING_OUT="$CHECK_MISSING_OUT" conda_run python \
+  maintenance_scripts/check_missing.py \
+  || on_fail "check_missing.py failed with exit code $?"
+
+if [[ -s "$CHECK_MISSING_OUT" ]]; then # written only when newly recorded
+  send_email_message "$SPYGLASS_EMAIL_DEST" \
+    "spyglass newly missing files $(date '+%Y-%m-%d')" \
+    "$(cat "$CHECK_MISSING_OUT")"
+  send_slack_message "Spyglass newly missing files:
+$(cat "$CHECK_MISSING_OUT")"
+fi
+rm -f "$CHECK_MISSING_OUT"
+
 # Run cleanup script; capture any file issues to a temp file for Slack reporting
 FILE_ISSUES_OUT=$(mktemp)
 FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py \

@@ -1,5 +1,9 @@
 from spyglass.utils.mixins.analysis import AnalysisMixin
 from spyglass.utils.mixins.cautious_delete import CautiousDeleteMixin
+from spyglass.utils.mixins.check_missing import (
+    PathTrackingMixin,
+    TrackedPath,
+)
 from spyglass.utils.mixins.export import ExportMixin
 from spyglass.utils.mixins.fetch import FetchMixin
 from spyglass.utils.mixins.helpers import HelperMixin
@@ -13,7 +17,9 @@ __all__ = [
     "ExportMixin",
     "FetchMixin",
     "HelperMixin",
+    "PathTrackingMixin",
     "RestrictByMixin",
     "PopulateMixin",
     "IngestionMixin",
+    "TrackedPath",
 ]

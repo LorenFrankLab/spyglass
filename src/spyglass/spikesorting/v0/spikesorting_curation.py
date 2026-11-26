@@ -40,6 +40,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.mixins import PathTrackingMixin, TrackedPath
 
 from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
@@ -380,7 +381,7 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class Waveforms(SpyglassMixin, dj.Computed):
+class Waveforms(PathTrackingMixin, SpyglassMixin, dj.Computed):
     definition = """
     -> WaveformSelection
     ---
@@ -388,6 +389,8 @@ class Waveforms(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
+
+    _tracked_paths = (TrackedPath("waveform_extractor_path", kind="dir"),)
 
     def make_fetch(self, key):
         """Populate Waveforms table with waveform extraction results
@@ -626,7 +629,7 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 
 @schema
-class QualityMetrics(SpyglassMixin, dj.Computed):
+class QualityMetrics(PathTrackingMixin, SpyglassMixin, dj.Computed):
 
     definition = """
     -> MetricSelection
@@ -635,6 +638,9 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
+
+    # A `_qm.json` file, not a directory
+    _tracked_paths = (TrackedPath("quality_metrics_path", kind="file"),)
 
     def make_fetch(self, key):
         """Populate QualityMetrics table with quality metric results.

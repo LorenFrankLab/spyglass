@@ -405,7 +405,17 @@ class ExportMixin(FetchMixin):
 
         from spyglass.common.common_nwbfile import AnalysisRegistry
 
-        return AnalysisRegistry().get_class(custom_parent[0])()
+        parent_cls = AnalysisRegistry().get_class(custom_parent[0])
+
+        # None here already means 'no custom parent'
+        if parent_cls is None:
+            raise RuntimeError(
+                f"Custom AnalysisNwbfile parent {custom_parent[0]} is not "
+                + "reachable: the table may be undeclared, or invisible to "
+                + "this account."
+            )
+
+        return parent_cls()
 
     def _parent_copy_to_common(self, fnames: List[str] = None):
         """Copy parent custom AnalysisNwbfile entries to common.
