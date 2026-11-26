@@ -1,10 +1,10 @@
 """Tests for PathTrackingMixin and the check_missing tracking tables.
 
-1. PathScanner - state per on-disk condition
-2. TrackedPath - declaration validation
-3. check_missing() - findings, exclusions, coverage
-4. run_all, refresh_all, summary - orchestration
-5. MissingPath - lost, unreadable, refresh_missing, last_covered_run
+1. PathScanner: state per on-disk condition
+2. TrackedPath: declaration validation
+3. check_missing(): findings, exclusions, coverage
+4. run_all, refresh_all, summary: orchestration
+5. MissingPath: lost, unreadable, refresh_missing, last_covered_run
 """
 
 import os
@@ -316,9 +316,8 @@ def test_refresh_drops_recovered_paths(
 ):
     """refresh_missing drops a restored path, so `lost` self-heals.
 
-    Without it the table keeps reporting a loss after the file came back.
-    A second loss then gets a fresh row naming the run that found it, so
-    the bound describes the current absence and not the first one.
+    A second loss gets a fresh row naming the run that found it, so the
+    bound describes the current absence rather than the first.
     """
     _, MissingPath = tracking_tables
     target = tmp_path / "comes_back"

@@ -407,9 +407,7 @@ class ExportMixin(FetchMixin):
 
         parent_cls = AnalysisRegistry().get_class(custom_parent[0])
 
-        # Raise rather than return None. None here means 'no custom parent',
-        # so a silent None would drop a parent this table really has and
-        # yield an incomplete export.
+        # None here already means 'no custom parent'
         if parent_cls is None:
             raise RuntimeError(
                 f"Custom AnalysisNwbfile parent {custom_parent[0]} is not "

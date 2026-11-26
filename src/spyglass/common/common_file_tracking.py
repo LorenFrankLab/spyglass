@@ -547,8 +547,7 @@ class CheckMissingRun(dj.Manual):
         run_id : int
             Key of the new run.
         """
-        # `started` is supplied rather than left to its default: DataJoint
-        # rejects a row with no named attributes
+        # DataJoint rejects a row with no named attributes
         self.insert1(dict(started=datetime.now()))
         # LAST_INSERT_ID is per connection, so it survives concurrent runs
         return dj.conn().query("SELECT LAST_INSERT_ID()").fetchone()[0]
@@ -656,9 +655,8 @@ class CheckMissingRun(dj.Manual):
         finally:
             self.close(run_id)
 
-        # Two different questions. A path recorded by an earlier run keeps
-        # that run_id, so 'newly recorded' is 0 on a run finding the same
-        # losses as the last. Reporting only that reads as all-clear.
+        # A path recorded by an earlier run keeps that run_id, so a run
+        # finding the same losses records nothing new
         newly = len(MissingPath() & {"run_id": run_id})
         logger.info(
             f"run {run_id}: {newly} newly recorded, "

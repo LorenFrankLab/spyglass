@@ -205,8 +205,8 @@ class PathTrackingMixin(BaseMixin):
     def __init_subclass__(cls, **kwargs):
         """Register any subclass that declares tracked paths."""
         super().__init_subclass__(**kwargs)
-        # `cls.__dict__`, not `cls._tracked_paths`: the inherited value would
-        # register every subclass of a declaring table, part tables included
+        # `cls.__dict__`, not `cls._tracked_paths`: the inherited value
+        # registers every subclass, part tables included
         if cls.__dict__.get("_tracked_paths"):
             _TRACKING_CLASSES.append(cls)
 
@@ -352,8 +352,8 @@ class PathTrackingMixin(BaseMixin):
             for (key, path), scan in zip(todo, scans):
                 if scan["state"] == "ok":
                     continue
-                # Named rather than splatted from `scan`, which also returns
-                # the file count and size it classifies a directory by
+                # `scan` also returns the file count and size, which
+                # classify a directory but are not recorded
                 found.append(
                     dict(
                         full_table_name=self.full_table_name,
@@ -366,10 +366,8 @@ class PathTrackingMixin(BaseMixin):
                     )
                 )
 
-        # One row per absent path, not per entry referencing it. Entries can
-        # share a path: 441 of 2441 DLC video_path values repeat, so 165
-        # absent references are 146 absent files. Counting references here
-        # would report a number the table cannot reproduce.
+        # Entries can share a path, so one row per absent path keeps the
+        # count reproducible from the table
         by_path = {finding["path_hash"]: finding for finding in found}
 
         self._missing_tbl().insert(list(by_path.values()), skip_duplicates=True)
